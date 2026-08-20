@@ -21,7 +21,14 @@ proxy_downloader/
     mediafire.py               sitio que necesita resolver el link en cada intento (caso avanzado)
     mega.py                     sitio con descifrado del lado del cliente (caso avanzado+)
     fichier.py                   sitio con countdown server-side + cookies de sesión (caso avanzado)
+  webui/                      Flask + job manager en background (esta rama, no está en main)
+webui.py                    punto de entrada del servidor web (esta rama, no está en main)
 ```
+
+> Esta rama (`docker-webui`) agrega una interfaz web + imagen Docker sobre el
+> mismo motor de descarga. La CLI (`downloader.py`) sigue funcionando igual
+> acá también — ver [Web UI / Docker](#web-ui--docker) más abajo. La rama
+> `main` es la versión CLI-only, sin Flask ni Docker.
 
 ## Uso
 
@@ -133,6 +140,54 @@ con proxies gratis lo más probable es que el siguiente también esté
 bloqueado, por eso el default acá es sin proxy. Si estás en `--no-proxy` y te
 topás con esto (poco común desde una IP residencial real), no hay otra IP
 para probar y el archivo queda marcado como fallido con un mensaje claro.
+
+## Web UI / Docker
+
+Interfaz web sobre el mismo motor de descarga: pegás una URL (o una carpeta,
+o un batch de varias líneas), elegís carpeta de salida y modo de proxy, y
+seguís el progreso de cada archivo desde el navegador. Corre siempre un
+trabajo a la vez, en el mismo orden en que se encolan — igual que ir
+corriendo la CLI repetidas veces.
+
+```bash
+docker compose up -d --build
+```
+
+Abrí `http://localhost:8080`. Por defecto:
+
+- `./downloads` (host) → `/downloads` (contenedor) — ahí caen los archivos.
+- `./config` (host) → `/app/config` — preferencias de proxy por sitio,
+  persistentes (lo mismo que `config/*.json` en la CLI).
+- `./state` (host) → `/app/state` — caché de proxies validados entre
+  reinicios del contenedor.
+
+Sin `docker compose`:
+
+```bash
+docker build -t proxy-downloader-webui .
+docker run -d -p 8080:8080 \
+  -v $(pwd)/downloads:/downloads \
+  -v $(pwd)/config:/app/config \
+  -v $(pwd)/state:/app/state \
+  proxy-downloader-webui
+```
+
+Corriendo fuera de Docker (por ejemplo para desarrollo local):
+
+```bash
+pip install -r requirements-webui.txt
+python webui.py                 # sirve en :8080 (PORT para cambiarlo)
+```
+
+`DOWNLOAD_DIR` (default `/downloads`) y `STATE_DIR` (default `/app/state`)
+son configurables por variable de entorno; las preferencias por sitio siguen
+viviendo en `config/` (relativo al directorio desde donde corrés el
+proceso), igual que en la CLI.
+
+La API REST que usa el frontend (`GET/POST /api/jobs`, `GET /api/jobs/<id>`,
+`GET /api/jobs/<id>/log`, `POST /api/jobs/<id>/cancel`, `GET /api/sites`,
+`POST /api/sites/<nombre>/proxy`) es la misma que consume la página — se
+puede scriptear igual.
 
 ## Agregar un sitio nuevo
 

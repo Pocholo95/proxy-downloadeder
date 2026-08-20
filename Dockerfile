@@ -1,0 +1,26 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY requirements.txt requirements-webui.txt ./
+RUN pip install --no-cache-dir -r requirements-webui.txt
+
+COPY downloader.py webui.py ./
+COPY proxy_downloader ./proxy_downloader
+
+RUN mkdir -p /downloads /app/config /app/state
+VOLUME ["/downloads", "/app/config", "/app/state"]
+
+ENV DOWNLOAD_DIR=/downloads \
+    STATE_DIR=/app/state \
+    PORT=8080
+
+EXPOSE 8080
+
+
+# A single worker process is required: job state lives in-memory in that
+# process (see proxy_downloader/webui/jobs.py). Threads still let it serve
+# several UI requests concurrently while a download runs on the background
+# job-worker thread.
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "1", "--threads", "8", \
+     "proxy_downloader.webui.app:app"]

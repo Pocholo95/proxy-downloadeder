@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Proxy Downloader</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header>
+    <h1>📥 Proxy Downloader</h1>
+    <p class="subtitle">Rotación de proxies · resume · batch · carpetas</p>
+  </header>
+
+  <main>
+    <section class="card" id="new-job-card">
+      <h2>Nueva descarga</h2>
+      <form id="job-form">
+        <div class="tabs">
+          <button type="button" class="tab active" data-kind="file">Archivo</button>
+          <button type="button" class="tab" data-kind="folder">Carpeta</button>
+          <button type="button" class="tab" data-kind="batch">Batch</button>
+        </div>
+
+        <div class="field" id="field-single">
+          <label for="value-single">URL o ID</label>
+          <input type="text" id="value-single" placeholder="https://pixeldrain.com/u/XXXXXXX">
+        </div>
+
+        <div class="field hidden" id="field-batch">
+          <label for="value-batch">Una URL/ID por línea (soporta líneas <code>folder: nombre</code>)</label>
+          <textarea id="value-batch" rows="8" placeholder="folder: fotos de perritos
+https://pixeldrain.com/u/XXXXXXX
+https://www.mediafire.com/file/XXXXXXX/nombre/file
+
+folder:
+https://1fichier.com/?XXXXXXXXX"></textarea>
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="output-dir">Carpeta de salida</label>
+            <input type="text" id="output-dir" placeholder="{{ default_output_dir }}">
+          </div>
+          <div class="field">
+            <label for="proxy-mode">Proxy</label>
+            <select id="proxy-mode">
+              <option value="auto">Auto (según el sitio)</option>
+              <option value="proxy">Forzar proxy</option>
+              <option value="no-proxy">Sin proxy</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="min-speed">Velocidad mínima (KB/s)</label>
+            <input type="number" id="min-speed" placeholder="1536">
+          </div>
+        </div>
+
+        <button type="submit" class="btn primary">Descargar</button>
+        <span id="form-error" class="error-msg"></span>
+      </form>
+    </section>
+
+    <section class="card" id="sites-card">
+      <h2>Sitios <button type="button" class="btn small" id="toggle-sites">mostrar/ocultar</button></h2>
+      <div id="sites-list" class="hidden"></div>
+    </section>
+
+    <section class="card">
+      <h2>Trabajos</h2>
+      <div id="jobs-list"><p class="dim">Sin trabajos todavía.</p></div>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

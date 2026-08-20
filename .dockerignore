@@ -1,9 +1,11 @@
+.git
+.gitignore
+venv/
 __pycache__/
 *.pyc
-working_proxies.json
-venv/
 config/*.json
+working_proxies.json
 urls.txt
-*.part
 downloads/
 state/
+README.md

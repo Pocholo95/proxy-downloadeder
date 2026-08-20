@@ -1,0 +1,12 @@
+services:
+  proxy-downloader:
+    build: .
+    image: proxy-downloader-webui
+    container_name: proxy-downloader
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./downloads:/downloads
+      - ./config:/app/config
+      - ./state:/app/state
+    restart: unless-stopped
