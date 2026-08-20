@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+working_proxies.json
+venv/
+config/*.json
+urls.txt
+*.part
