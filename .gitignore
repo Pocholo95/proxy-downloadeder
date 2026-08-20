@@ -7,3 +7,4 @@ urls.txt
 *.part
 downloads/
 state/
+.env

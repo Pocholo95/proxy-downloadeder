@@ -161,6 +161,15 @@ Abrí `http://localhost:8080`. Por defecto:
 - `./state` (host) → `/app/state` — caché de proxies validados entre
   reinicios del contenedor.
 
+Esas rutas y el puerto salen de variables de entorno con default (`WEB_PORT`,
+`DOWNLOADS_PATH`, `CONFIG_PATH`, `STATE_PATH` — ver `.env.example`), así que
+no hace falta tocar `docker-compose.yml` para cambiarlas: copiá
+`.env.example` a `.env` y editalo, o si estás desplegando desde un stack
+manager que lee el compose directo de este repo (Portainer, **Arcane**,
+Dockge, etc. — donde el archivo suele quedar de solo lectura porque viene de
+git), cargá esas mismas variables en la sección de "Environment
+variables"/"Environment" del stack en su UI.
+
 Sin `docker compose`:
 
 ```bash
