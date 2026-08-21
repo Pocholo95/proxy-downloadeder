@@ -9,6 +9,7 @@ from . import pixeldrain  # noqa: F401
 from . import mediafire  # noqa: F401
 from . import mega  # noqa: F401
 from . import fichier  # noqa: F401
+from . import gofile  # noqa: F401
 
 # Add new site modules here, e.g.:
-# from . import gofile  # noqa: F401
+# from . import example  # noqa: F401

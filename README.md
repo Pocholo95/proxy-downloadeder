@@ -21,6 +21,7 @@ proxy_downloader/
     mediafire.py               sitio que necesita resolver el link en cada intento (caso avanzado)
     mega.py                     sitio con descifrado del lado del cliente (caso avanzado+)
     fichier.py                   sitio con countdown server-side + cookies de sesión (caso avanzado)
+    gofile.py                     sitio con cuenta guest + token anti-scraping (caso avanzado)
   webui/                      Flask + job manager en background (esta rama, no está en main)
 webui.py                    punto de entrada del servidor web (esta rama, no está en main)
 ```
@@ -37,6 +38,8 @@ python downloader.py -f https://pixeldrain.com/u/XXXXXXX
 python downloader.py -f https://www.mediafire.com/file/XXXXXXX/nombre/file
 python downloader.py -f https://mega.nz/file/XXXXXXXX#clave
 python downloader.py -f https://1fichier.com/?XXXXXXXXX
+python downloader.py -f https://gofile.io/d/XXXXXXX      # archivo suelto
+python downloader.py -F https://gofile.io/d/XXXXXXX      # o carpeta — mismo link, se detecta solo
 python downloader.py -F https://pixeldrain.com/l/XXXXXXX
 python downloader.py -b lista.txt          # batch, puede mezclar sitios distintos
 python downloader.py --list-sites          # ver sitios y si usan proxy por defecto
@@ -79,19 +82,25 @@ individuales se van marcando `# [OK]` / `# [FAILED]` como siempre.
 >   desactivado por defecto: con proxies gratis casi nunca ayuda, solo gasta
 >   todo el pool pegando contra el mismo bloqueo. `--no-proxy` (tu IP real)
 >   es lo que de verdad lo esquiva. Ver más abajo.
+> - Gofile no distingue archivo de carpeta por la URL — `gofile.io/d/XXXXX`
+>   sirve para ambos, se sabe cuál es recién al consultar la API. `-f` sobre
+>   un link que resulta ser carpeta falla con un mensaje claro pidiendo `-F`
+>   (y viceversa no aplica: `-F` sobre un archivo suelto lo baja igual,
+>   adentro de una subcarpeta con el nombre del id). No soporta contenido con
+>   contraseña.
 
 El sitio se detecta automáticamente por el dominio de la URL (o, si es un ID
 suelto, se usa el sitio marcado como default). No hace falta pasar `--site`.
 
 ### Proxy por sitio
 
-Cada sitio trae un default (`use_proxy_by_default` en su clase). Pixeldrain y
-Mega lo usan por defecto (banean/limitan agresivo por IP); Mediafire y
-1fichier no — Mediafire porque sus links de CDN no están rate-limited de esa
-forma, 1fichier porque activamente bloquea IPs de datacenter/proxy (justo lo
-que son los proxies gratis de esta lista). En un batch mixto, cada archivo
-usa el modo de su propio sitio automáticamente — vas a ver `(proxy)` o
-`(direct)` en la salida por cada uno.
+Cada sitio trae un default (`use_proxy_by_default` en su clase). Pixeldrain,
+Mega y Gofile lo usan por defecto (banean/limitan agresivo por IP en su tier
+gratis/guest); Mediafire y 1fichier no — Mediafire porque sus links de CDN no
+están rate-limited de esa forma, 1fichier porque activamente bloquea IPs de
+datacenter/proxy (justo lo que son los proxies gratis de esta lista). En un
+batch mixto, cada archivo usa el modo de su propio sitio automáticamente —
+vas a ver `(proxy)` o `(direct)` en la salida por cada uno.
 
 Hay tres niveles, de más a menos prioridad:
 
@@ -250,7 +259,7 @@ Con eso alcanza: la rotación de proxies, el resume, el chequeo de velocidad,
 el modo batch y el modo carpeta ya funcionan solos para el sitio nuevo — todo
 eso vive en `core/downloader.py` y no depende de ningún sitio en particular.
 
-Cuatro ejemplos reales para copiar según tu caso:
+Cinco ejemplos reales para copiar según tu caso:
 - `proxy_downloader/sites/pixeldrain.py` — sitio simple, URL de descarga fija,
   proxy activado por defecto.
 - `proxy_downloader/sites/mediafire.py` — sitio que necesita scrapear la
@@ -269,3 +278,9 @@ Cuatro ejemplos reales para copiar según tu caso:
   intento). Usa `RateLimited` para el caso "esta IP está bloqueada/CAPTCHA
   ahora" — distinto de `FileUnavailable`, porque acá el proxy no está roto,
   solo hay que probar con otro.
+- `proxy_downloader/sites/gofile.py` — sitio donde `extract_file_id` y
+  `extract_folder_id` aceptan el mismo id (la URL no distingue archivo de
+  carpeta) y quien decide es `download_url`/`resolve_folder` según lo que
+  diga la API; requiere una cuenta "guest" (token) más un segundo header
+  anti-scraping calculado localmente, ambos cacheados en la instancia del
+  provider y reusados en cada archivo.
