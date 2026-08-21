@@ -1,6 +1,8 @@
 const state = {
   kind: "file",
   openLogs: new Set(),
+  filesOpen: false,
+  filesPath: "",
 };
 
 const els = {
@@ -18,6 +20,11 @@ const els = {
   jobsList: document.getElementById("jobs-list"),
   sitesList: document.getElementById("sites-list"),
   toggleSites: document.getElementById("toggle-sites"),
+  filesPanel: document.getElementById("files-panel"),
+  filesList: document.getElementById("files-list"),
+  filesBreadcrumb: document.getElementById("files-breadcrumb"),
+  toggleFiles: document.getElementById("toggle-files"),
+  refreshFiles: document.getElementById("refresh-files"),
 };
 
 const SINGLE_LABELS = {
@@ -49,8 +56,10 @@ els.toggleSites.addEventListener("click", () => {
 });
 
 function fmtBytes(n) {
-  if (!n || n <= 0) return "0 MB";
-  const mb = n / (1024 * 1024);
+  if (!n || n <= 0) return "0 KB";
+  const kb = n / 1024;
+  if (kb < 1024) return `${kb.toFixed(kb < 10 ? 1 : 0)} KB`;
+  const mb = kb / 1024;
   if (mb < 1024) return `${mb.toFixed(1)} MB`;
   return `${(mb / 1024).toFixed(2)} GB`;
 }
@@ -216,6 +225,90 @@ async function refreshJobs() {
   }
 }
 
+function joinPath(dir, name) {
+  return dir ? `${dir}/${name}` : name;
+}
+
+function fmtDate(ts) {
+  return new Date(ts * 1000).toLocaleString();
+}
+
+function renderBreadcrumb() {
+  const parts = state.filesPath ? state.filesPath.split("/") : [];
+  let acc = "";
+  const crumbs = [`<button data-path="">downloads</button>`];
+  for (const part of parts) {
+    acc = joinPath(acc, part);
+    crumbs.push(`<span class="sep">/</span><button data-path="${acc}">${part}</button>`);
+  }
+  els.filesBreadcrumb.innerHTML = crumbs.join("");
+  els.filesBreadcrumb.querySelectorAll("button[data-path]").forEach((btn) => {
+    btn.addEventListener("click", () => loadFiles(btn.dataset.path));
+  });
+}
+
+function fileRow(entry) {
+  const path = joinPath(state.filesPath, entry.name);
+  const sizeLabel = entry.is_dir ? "carpeta" : fmtBytes(entry.size);
+  const nameCell = entry.is_dir
+    ? `<button class="link-btn" data-open="${path}">📁 ${entry.name}</button>`
+    : `${entry.partial ? "⏳" : "📄"} ${entry.name}`;
+  return `<tr>
+    <td>${nameCell}</td>
+    <td class="dim">${sizeLabel}${entry.partial ? " (incompleto)" : ""}</td>
+    <td class="dim">${fmtDate(entry.mtime)}</td>
+    <td class="actions">
+      <button class="btn small" data-download="${path}">Descargar${entry.is_dir ? " (.zip)" : ""}</button>
+      <button class="btn small danger" data-delete="${path}" data-name="${entry.name}">Borrar</button>
+    </td>
+  </tr>`;
+}
+
+async function loadFiles(path) {
+  try {
+    const data = await fetchJSON(`/api/files?path=${encodeURIComponent(path || "")}`);
+    state.filesPath = data.path;
+    renderBreadcrumb();
+    els.filesList.innerHTML = data.entries.length
+      ? `<table>
+          <thead><tr><th>Nombre</th><th>Tamaño</th><th>Modificado</th><th></th></tr></thead>
+          <tbody>${data.entries.map(fileRow).join("")}</tbody>
+        </table>`
+      : `<p class="dim">Vacío.</p>`;
+
+    els.filesList.querySelectorAll("button[data-open]").forEach((btn) => {
+      btn.addEventListener("click", () => loadFiles(btn.dataset.open));
+    });
+    els.filesList.querySelectorAll("button[data-download]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        window.location.href = `/api/files/download?path=${encodeURIComponent(btn.dataset.download)}`;
+      });
+    });
+    els.filesList.querySelectorAll("button[data-delete]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        if (!confirm(`¿Borrar "${btn.dataset.name}"? Esta acción no se puede deshacer.`)) return;
+        await fetchJSON("/api/files", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: btn.dataset.delete }),
+        });
+        loadFiles(state.filesPath);
+      });
+    });
+  } catch (err) {
+    els.filesList.innerHTML = `<p class="error-msg">${err.message}</p>`;
+  }
+}
+
+els.toggleFiles.addEventListener("click", () => {
+  state.filesOpen = !state.filesOpen;
+  els.filesPanel.classList.toggle("hidden", !state.filesOpen);
+  els.refreshFiles.classList.toggle("hidden", !state.filesOpen);
+  if (state.filesOpen) loadFiles(state.filesPath);
+});
+els.refreshFiles.addEventListener("click", () => loadFiles(state.filesPath));
+
 refreshSites();
 refreshJobs();
 setInterval(refreshJobs, 1500);
+setInterval(() => { if (state.filesOpen) loadFiles(state.filesPath); }, 5000);

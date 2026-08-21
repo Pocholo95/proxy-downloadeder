@@ -294,6 +294,11 @@ class JobManager:
                 with job.lock:
                     item["status"] = "done" if ok else "failed"
                     item["code"] = code
+                    # The last "downloading" progress report is throttled to
+                    # once/second, so the final bytes written after that tick
+                    # never get reflected — snap the bar to 100% on success.
+                    if ok and item["total"]:
+                        item["bytes_done"] = item["total"]
 
             with job.lock:
                 if job.status != "cancelled":

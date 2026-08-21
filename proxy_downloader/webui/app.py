@@ -4,9 +4,10 @@ that actually drives downloads on a background thread.
 """
 import os
 
-from flask import Flask, jsonify, request, render_template
+from flask import Flask, jsonify, request, render_template, send_file, after_this_request
 
 from .. import sites  # noqa: F401  (import triggers site provider registration)
+from . import files as files_api
 from .jobs import JobManager
 
 OUTPUT_DIR = os.environ.get("DOWNLOAD_DIR", "/downloads")
@@ -81,6 +82,53 @@ def api_cancel_job(job_id):
     if not ok:
         return jsonify({"error": "job not cancellable (already running/finished, or not found)"}), 409
     return jsonify({"ok": True})
+
+
+@app.get("/api/files")
+def api_list_files():
+    rel = request.args.get("path", "")
+    try:
+        rel_norm, entries = files_api.list_dir(OUTPUT_DIR, rel)
+    except files_api.UnsafePath:
+        return jsonify({"error": "invalid path"}), 400
+    except (FileNotFoundError, NotADirectoryError):
+        return jsonify({"error": "not found"}), 404
+    return jsonify({"path": rel_norm, "entries": entries})
+
+
+@app.delete("/api/files")
+def api_delete_file():
+    data = request.get_json(silent=True) or {}
+    rel = data.get("path", "")
+    try:
+        files_api.delete_path(OUTPUT_DIR, rel)
+    except files_api.UnsafePath as e:
+        return jsonify({"error": str(e)}), 400
+    except FileNotFoundError:
+        return jsonify({"error": "not found"}), 404
+    return jsonify({"ok": True})
+
+
+@app.get("/api/files/download")
+def api_download_file():
+    rel = request.args.get("path", "")
+    try:
+        path, name, is_temp = files_api.prepare_download(OUTPUT_DIR, rel)
+    except files_api.UnsafePath:
+        return jsonify({"error": "invalid path"}), 400
+    except FileNotFoundError:
+        return jsonify({"error": "not found"}), 404
+
+    if is_temp:
+        @after_this_request
+        def _cleanup(response):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            return response
+
+    return send_file(path, as_attachment=True, download_name=name)
 
 
 def main():

@@ -112,6 +112,23 @@ textarea { resize: vertical; font-family: ui-monospace, monospace; font-size: 0.
 #sites-list th, #sites-list td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
 #sites-list td.actions button { margin-right: 4px; }
 
+.breadcrumb { font-size: 0.82rem; color: var(--dim); margin-bottom: 10px; }
+.breadcrumb button {
+  background: none; border: none; color: var(--accent); cursor: pointer;
+  font-size: 0.82rem; padding: 0;
+}
+.breadcrumb .sep { margin: 0 4px; }
+
+#files-list table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+#files-list th, #files-list td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+#files-list td.actions { text-align: right; white-space: nowrap; }
+#files-list td.actions button { margin-left: 6px; }
+.link-btn {
+  background: none; border: none; color: var(--text); cursor: pointer;
+  font-size: 0.85rem; padding: 0; text-align: left;
+}
+.link-btn:hover { color: var(--accent); }
+
 .job {
   border: 1px solid var(--border);
   border-radius: 10px;
