@@ -24,6 +24,7 @@ proxy_downloader/
     gofile.py                     sitio con cuenta guest + token anti-scraping (caso avanzado)
     fileditch.py                   sitio con proof-of-work + link firmado ofuscado en JS (caso avanzado)
     bunkr.py                        sitio con álbumes paginados + resolución de link en 2 pasos (caso avanzado)
+    filester.py                      sitio con dos versiones de API — la vieja bloqueada, la v2 no (caso avanzado)
   webui/                      Flask + job manager en background — ver Web UI / Docker más abajo
 webui.py                    punto de entrada del servidor web (interfaz)
 ```
@@ -45,6 +46,8 @@ python downloader.py -F https://gofile.io/d/XXXXXXX      # o carpeta — mismo l
 python downloader.py -f https://fileditchfiles.st/XXXXXXX/XXXXXXX/nombre.ext
 python downloader.py -f https://bunkr.si/f/XXXXXXX        # archivo suelto (o /i/, /v/)
 python downloader.py -F https://bunkr.si/a/XXXXXXX        # álbum — cualquier dominio bunkr.*, no solo .si
+python downloader.py -f https://filester.me/d/XXXXXXX     # archivo suelto (o filester.gg)
+python downloader.py -F https://filester.me/f/XXXXXXX     # carpeta
 python downloader.py -F https://pixeldrain.com/l/XXXXXXX
 python downloader.py -b lista.txt          # batch, puede mezclar sitios distintos
 python downloader.py --list-sites          # ver sitios y si usan proxy por defecto
@@ -99,11 +102,17 @@ individuales se van marcando `# [OK]` / `# [FAILED]` como siempre.
 >   corta — por eso se resuelve de cero en cada intento, igual que Mediafire.
 >   No es una cuenta ni un login, solo cómputo (bien barato, <1s), así que no
 >   hace falta nada especial de tu lado.
-> - **Filester** (filester.gg) se evaluó pero no se implementó: el paso de
->   descarga final está detrás de DataDome (WAF anti-bot comercial), no algo
->   que se pueda resolver con cómputo local como el proof-of-work de
->   FileDitch — no es confiable de automatizar con `requests` y probablemente
->   empeora con proxies gratis (mala reputación de IP).
+> - **Filester** se había descartado en un primer intento: el endpoint de
+>   descarga *v1* (`/api/public/download`) entrega un link detrás de
+>   DataDome (WAF anti-bot comercial), no resoluble por cómputo local como
+>   el proof-of-work de FileDitch. Encontramos que existe un endpoint *v2*
+>   (`/v2/api/public/download`, mismo CDN pero forma de URL distinta) que
+>   no pasa por ese bloqueo — verificado en vivo (HEAD, GET y Range, todos
+>   con bytes reales, sin desafío) contra un archivo subido de verdad. El
+>   listado de carpetas (`/f/<id>`, paginado) sale del mismo repo de
+>   referencia pero no se pudo probar en vivo contra una carpeta real
+>   (necesitaría una cuenta paga/registrada) — avisá si una carpeta de
+>   verdad se porta raro.
 > - Bunkr cambia/agrega dominios espejo seguido (bunkr.si, .sk, .ph, .cr...)
 >   para esquivar bloqueos, así que la detección no usa una lista fija de
 >   dominios — acepta cualquier host cuyo nombre sea literalmente "bunkr"
@@ -117,13 +126,14 @@ suelto, se usa el sitio marcado como default). No hace falta pasar `--site`.
 ### Proxy por sitio
 
 Cada sitio trae un default (`use_proxy_by_default` en su clase). Pixeldrain,
-Mega y Gofile lo usan por defecto (banean/limitan agresivo por IP en su tier
-gratis/guest); Mediafire, FileDitch y Bunkr no — sus links de CDN no están
-rate-limited de esa forma (el proof-of-work de FileDitch frena scraping
-masivo, no una descarga puntual); 1fichier tampoco, pero por otra razón:
-activamente bloquea IPs de datacenter/proxy (justo lo que son los proxies
-gratis de esta lista). En un batch mixto, cada archivo usa el modo de su
-propio sitio automáticamente — vas a ver `(proxy)` o `(direct)` en la
+Mega, Gofile y Filester lo usan por defecto (banean/limitan agresivo por IP
+en su tier gratis/guest — para Filester no hay evidencia confirmada, pero
+se optó por el lado cauteloso); Mediafire, FileDitch y Bunkr no — sus links
+de CDN no están rate-limited de esa forma (el proof-of-work de FileDitch
+frena scraping masivo, no una descarga puntual); 1fichier tampoco, pero por
+otra razón: activamente bloquea IPs de datacenter/proxy (justo lo que son
+los proxies gratis de esta lista). En un batch mixto, cada archivo usa el
+modo de su propio sitio automáticamente — vas a ver `(proxy)` o `(direct)` en la
 salida por cada uno.
 
 **Velocidad mínima** (`--speed`, default 1500 KB/s): solo aplica cuando la
@@ -357,7 +367,7 @@ Con eso alcanza: la rotación de proxies, el resume, el chequeo de velocidad,
 el modo batch y el modo carpeta ya funcionan solos para el sitio nuevo — todo
 eso vive en `core/downloader.py` y no depende de ningún sitio en particular.
 
-Siete ejemplos reales para copiar según tu caso:
+Ocho ejemplos reales para copiar según tu caso:
 - `proxy_downloader/sites/pixeldrain.py` — sitio simple, URL de descarga fija,
   proxy activado por defecto.
 - `proxy_downloader/sites/mediafire.py` — sitio que necesita scrapear la
@@ -394,3 +404,7 @@ Siete ejemplos reales para copiar según tu caso:
   dos pasos encadenados (CDN → firma con token). También el ejemplo de por
   qué `folder_id` no puede ser una URL cruda: se usa como nombre de
   subcarpeta, así que tiene que ser algo sin `/` (acá, `"dominio:id"`).
+- `proxy_downloader/sites/filester.py` — el mismo sitio puede tener más de
+  un endpoint que hace básicamente lo mismo, y no ser equivalentes: la API
+  vieja (v1) está bloqueada por un WAF comercial, la v2 no. Vale la pena
+  buscar si hay una versión más nueva antes de descartar un sitio del todo.
