@@ -157,6 +157,22 @@ def api_download_file():
     return send_file(path, as_attachment=True, download_name=name)
 
 
+@app.get("/api/files/preview")
+def api_preview_file():
+    rel = request.args.get("path", "")
+    try:
+        path, kind = files_api.prepare_preview(OUTPUT_DIR, rel)
+    except files_api.UnsafePath:
+        return jsonify({"error": "invalid path"}), 400
+    except FileNotFoundError:
+        return jsonify({"error": "not found"}), 404
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 415
+    # conditional=True (Flask's default) enables Range requests, needed for
+    # video/audio seeking — inline, not attachment, so it renders in-page.
+    return send_file(path, as_attachment=False, conditional=True)
+
+
 def main():
     port = int(os.environ.get("PORT", "8080"))
     app.run(host="0.0.0.0", port=port)

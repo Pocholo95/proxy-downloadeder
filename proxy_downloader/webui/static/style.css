@@ -194,3 +194,52 @@ pre.log {
   word-break: break-all;
   margin-top: 10px;
 }
+
+.preview-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(6, 7, 10, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 32px;
+}
+
+.preview-modal.hidden { display: none; }
+
+.preview-modal-inner {
+  position: relative;
+  max-width: 92vw;
+  max-height: 92vh;
+  display: flex;
+}
+
+.preview-modal-inner video,
+.preview-modal-inner img {
+  max-width: 92vw;
+  max-height: 92vh;
+  display: block;
+  border-radius: 8px;
+  background: black;
+}
+
+.preview-modal-inner audio {
+  width: min(600px, 88vw);
+  align-self: center;
+}
+
+.preview-close {
+  position: absolute;
+  top: -44px;
+  right: 0;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 8px;
+}
+
+.preview-close:hover { color: white; }

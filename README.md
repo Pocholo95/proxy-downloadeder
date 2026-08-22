@@ -199,6 +199,12 @@ vez terminado — o **"limpiar completados"** para vaciar todo lo terminado de
 una. El historial también se poda solo, guardando como mucho los últimos 300
 trabajos.
 
+La sección "Archivos" es un mini explorador de `/downloads`: navegás
+subcarpetas, bajás un archivo suelto o una carpeta entera (zip al vuelo),
+borrás, y para video/audio/imagen hay **preview in-browser** — click en el
+nombre abre un reproductor con seek (soporta Range) sin descargar nada,
+`Esc` o click afuera para cerrar.
+
 ```bash
 docker network create proxy   # una vez, salvo que ya tengas una red externa "proxy" (p. ej. la que usa tu Traefik)
 docker compose up -d --build
@@ -273,8 +279,8 @@ La API REST que usa el frontend (`GET/POST /api/jobs`, `GET /api/jobs/<id>`,
 `POST /api/jobs/<id>/retry`, `DELETE /api/jobs/<id>`,
 `POST /api/jobs/clear-finished`, `GET /api/sites`,
 `POST /api/sites/<nombre>/proxy`, `GET/DELETE /api/files`,
-`GET /api/files/download`) es la misma que consume la página — se puede
-scriptear igual.
+`GET /api/files/download`, `GET /api/files/preview`) es la misma que
+consume la página — se puede scriptear igual.
 
 ## Agregar un sitio nuevo
 

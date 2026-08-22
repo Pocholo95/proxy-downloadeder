@@ -10,9 +10,29 @@ import tempfile
 import zipfile
 from pathlib import Path
 
+# Raster/binary media only — no .svg (can carry scripts) and no formats a
+# browser would try to render as markup. Whitelisted server-side too, not
+# just client-side, since this gates what gets served with an *inline*
+# Content-Disposition (rendered/played in-page) instead of forced download.
+VIDEO_EXTS = {".mp4", ".webm", ".ogv", ".mov", ".m4v", ".mkv", ".avi"}
+AUDIO_EXTS = {".mp3", ".wav", ".ogg", ".m4a", ".flac", ".aac"}
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+
 
 class UnsafePath(ValueError):
     pass
+
+
+def media_kind(name):
+    """"video"/"audio"/"image" for a previewable file, else None."""
+    ext = Path(name).suffix.lower()
+    if ext in VIDEO_EXTS:
+        return "video"
+    if ext in AUDIO_EXTS:
+        return "audio"
+    if ext in IMAGE_EXTS:
+        return "image"
+    return None
 
 
 def safe_path(root, rel):
@@ -44,6 +64,7 @@ def list_dir(root, rel):
             "size": None if p.is_dir() else st.st_size,
             "mtime": st.st_mtime,
             "partial": p.suffix == ".part",
+            "kind": None if p.is_dir() else media_kind(p.name),
         })
     rel_norm = "" if target == root else str(target.relative_to(root))
     return rel_norm, entries
@@ -61,6 +82,18 @@ def delete_path(root, rel):
         shutil.rmtree(target)
     else:
         target.unlink()
+
+
+def prepare_preview(root, rel):
+    """Returns (path, kind) for a previewable file — never a directory, and
+    only for the video/audio/image extensions in media_kind()."""
+    target = safe_path(root, rel)
+    if not target.is_file():
+        raise FileNotFoundError(str(target))
+    kind = media_kind(target.name)
+    if kind is None:
+        raise ValueError(f"Unsupported file type for preview: {target.name!r}")
+    return target, kind
 
 
 def prepare_download(root, rel):

@@ -85,6 +85,13 @@ https://1fichier.com/?XXXXXXXXX"></textarea>
     </section>
   </main>
 
+  <div id="preview-modal" class="preview-modal hidden">
+    <div class="preview-modal-inner">
+      <button type="button" class="preview-close" id="preview-close">✕</button>
+      <div id="preview-content"></div>
+    </div>
+  </div>
+
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>

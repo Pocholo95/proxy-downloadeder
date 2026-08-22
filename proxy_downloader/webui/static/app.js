@@ -25,6 +25,9 @@ const els = {
   toggleFiles: document.getElementById("toggle-files"),
   refreshFiles: document.getElementById("refresh-files"),
   clearFinished: document.getElementById("clear-finished"),
+  previewModal: document.getElementById("preview-modal"),
+  previewContent: document.getElementById("preview-content"),
+  previewClose: document.getElementById("preview-close"),
 };
 
 els.tabs.forEach((tab) => {
@@ -266,12 +269,20 @@ function renderBreadcrumb() {
   });
 }
 
+const KIND_ICONS = { video: "🎬", audio: "🎵", image: "🖼" };
+
 function fileRow(entry) {
   const path = joinPath(state.filesPath, entry.name);
   const sizeLabel = entry.is_dir ? "carpeta" : fmtBytes(entry.size);
-  const nameCell = entry.is_dir
-    ? `<button class="link-btn" data-open="${path}">📁 ${entry.name}</button>`
-    : `${entry.partial ? "⏳" : "📄"} ${entry.name}`;
+  const icon = entry.is_dir ? "📁" : entry.partial ? "⏳" : (KIND_ICONS[entry.kind] || "📄");
+  let nameCell;
+  if (entry.is_dir) {
+    nameCell = `<button class="link-btn" data-open="${path}">${icon} ${entry.name}</button>`;
+  } else if (entry.kind && !entry.partial) {
+    nameCell = `<button class="link-btn" data-preview="${path}" data-kind="${entry.kind}">${icon} ${entry.name}</button>`;
+  } else {
+    nameCell = `${icon} ${entry.name}`;
+  }
   return `<tr>
     <td>${nameCell}</td>
     <td class="dim">${sizeLabel}${entry.partial ? " (incompleto)" : ""}</td>
@@ -297,6 +308,9 @@ async function loadFiles(path) {
 
     els.filesList.querySelectorAll("button[data-open]").forEach((btn) => {
       btn.addEventListener("click", () => loadFiles(btn.dataset.open));
+    });
+    els.filesList.querySelectorAll("button[data-preview]").forEach((btn) => {
+      btn.addEventListener("click", () => openPreview(btn.dataset.preview, btn.dataset.kind));
     });
     els.filesList.querySelectorAll("button[data-download]").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -326,6 +340,33 @@ els.toggleFiles.addEventListener("click", () => {
   if (state.filesOpen) loadFiles(state.filesPath);
 });
 els.refreshFiles.addEventListener("click", () => loadFiles(state.filesPath));
+
+function openPreview(path, kind) {
+  const url = `/api/files/preview?path=${encodeURIComponent(path)}`;
+  if (kind === "video") {
+    els.previewContent.innerHTML = `<video src="${url}" controls autoplay></video>`;
+  } else if (kind === "audio") {
+    els.previewContent.innerHTML = `<audio src="${url}" controls autoplay></audio>`;
+  } else if (kind === "image") {
+    els.previewContent.innerHTML = `<img src="${url}" alt="">`;
+  } else {
+    return;
+  }
+  els.previewModal.classList.remove("hidden");
+}
+
+function closePreview() {
+  els.previewModal.classList.add("hidden");
+  els.previewContent.innerHTML = ""; // removing the element stops playback
+}
+
+els.previewClose.addEventListener("click", closePreview);
+els.previewModal.addEventListener("click", (e) => {
+  if (e.target === els.previewModal) closePreview();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closePreview();
+});
 
 refreshSites();
 refreshJobs();
