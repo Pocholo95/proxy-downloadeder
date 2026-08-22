@@ -10,6 +10,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 
+from ..utils import sanitize_filename
 from . import video_optimize
 
 # Raster/binary media only — no .svg (can carry scripts) and no formats a
@@ -87,6 +88,41 @@ def delete_path(root, rel):
         shutil.rmtree(target)
     else:
         target.unlink()
+
+
+def rename_path(root, rel, new_name):
+    """Rename the file/folder at `rel` to `new_name`. `new_name` is always
+    treated as a bare filename, never a path: sanitize_filename() strips
+    any "/" it contains, and "."/".." are rejected explicitly — otherwise
+    a rename could be (ab)used to move a file into a parent directory
+    (Path.rename() doesn't stop ".." from working the way the OS normally
+    would). Returns (new_rel_path, new_name)."""
+    target = safe_path(root, rel)
+    root = Path(root).resolve()
+    if target == root:
+        raise UnsafePath("Refusing to rename the download directory itself")
+    if not target.exists():
+        raise FileNotFoundError(str(target))
+    if target.suffix == ".part":
+        raise ValueError("No se puede renombrar una descarga en curso")
+
+    raw = (new_name or "").strip()
+    if not raw:
+        raise ValueError("Falta el nombre nuevo")
+    clean_name = sanitize_filename(raw)
+    if clean_name == "download.bin" and raw != "download.bin":
+        raise ValueError("El nombre no tiene caracteres válidos")
+    if clean_name in (".", ".."):
+        raise ValueError("Nombre inválido")
+
+    new_target = target.parent / clean_name
+    if new_target == target:
+        return str(target.relative_to(root)), clean_name  # no-op, same name
+    if new_target.exists():
+        raise FileExistsError(f'Ya existe algo llamado "{clean_name}" ahí')
+
+    target.rename(new_target)
+    return str(new_target.relative_to(root)), clean_name
 
 
 def prepare_preview(root, rel):

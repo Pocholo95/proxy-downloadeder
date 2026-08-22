@@ -211,9 +211,12 @@ trabajos.
 
 La sección "Archivos" es un mini explorador de `/downloads`: navegás
 subcarpetas, bajás un archivo suelto o una carpeta entera (zip al vuelo),
-borrás, y para video/audio/imagen hay **preview in-browser** — click en el
-nombre abre un reproductor con seek (soporta Range) sin descargar nada,
-`Esc` o click afuera para cerrar.
+**renombrás** (botón "✏ Renombrar", pide el nombre nuevo; rechaza `.`/`..`
+y cualquier `/` que metas, así que nunca puede mover el archivo fuera de su
+carpeta, y no deja renombrar una descarga `.part` en curso), borrás, y para
+video/audio/imagen hay **preview in-browser** — click en el nombre abre un
+reproductor con seek (soporta Range) sin descargar nada, `Esc` o click
+afuera para cerrar.
 
 Cada `.mp4`/`.m4v`/`.mov` tiene un botón **"🚀 Optimizar"**: hace
 `ffmpeg -c copy -movflags +faststart`, un *remux* (no transcodifica —
@@ -331,6 +334,7 @@ La API REST que usa el frontend (`GET/POST /api/jobs`, `GET /api/jobs/<id>`,
 `POST /api/jobs/<id>/retry`, `DELETE /api/jobs/<id>`,
 `POST /api/jobs/clear-finished`, `GET /api/sites`,
 `POST /api/sites/<nombre>/proxy`, `GET/DELETE /api/files`,
+`POST /api/files/rename`,
 `GET /api/files/download`, `GET /api/files/preview`, `POST /api/files/optimize`,
 `GET /api/uploads/sites`,
 `POST/DELETE /api/uploads/account/<sitio>`, `GET/POST /api/uploads/folders/<sitio>`,

@@ -323,6 +323,7 @@ function fileRow(entry) {
       ${entry.optimizable ? `<button class="btn small" data-optimize="${path}">🚀 Optimizar</button>` : ""}
       ${entry.is_dir ? "" : `<button class="btn small" data-upload-existing="${path}" data-upload-name="${entry.name}">⬆ Subir</button>`}
       <button class="btn small" data-download="${path}">Descargar${entry.is_dir ? " (.zip)" : ""}</button>
+      ${entry.partial ? "" : `<button class="btn small" data-rename="${path}" data-name="${entry.name}">✏ Renombrar</button>`}
       <button class="btn small danger" data-delete="${path}" data-name="${entry.name}">Borrar</button>
     </td>
   </tr>`;
@@ -373,6 +374,27 @@ async function loadFiles(path) {
     els.filesList.querySelectorAll("button[data-download]").forEach((btn) => {
       btn.addEventListener("click", () => {
         window.location.href = `/api/files/download?path=${encodeURIComponent(btn.dataset.download)}`;
+      });
+    });
+    els.filesList.querySelectorAll("button[data-rename]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const current = btn.dataset.name;
+        const proposed = prompt("Nuevo nombre:", current);
+        if (proposed === null || proposed.trim() === "" || proposed.trim() === current) return;
+        try {
+          await fetchJSON("/api/files/rename", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ path: btn.dataset.rename, new_name: proposed }),
+          });
+          if (state.uploadSelectedExisting && state.uploadSelectedExisting.path === btn.dataset.rename) {
+            state.uploadSelectedExisting = null;
+            renderUploadSelectedExisting();
+          }
+          loadFiles(state.filesPath);
+        } catch (err) {
+          alert(`No se pudo renombrar: ${err.message}`);
+        }
       });
     });
     els.filesList.querySelectorAll("button[data-delete]").forEach((btn) => {
