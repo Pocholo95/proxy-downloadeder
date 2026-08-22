@@ -33,6 +33,57 @@ def ffmpeg_available():
     return shutil.which("ffmpeg") is not None
 
 
+def is_faststart(path):
+    """True if `moov` shows up before `mdat` as top-level boxes (already
+    optimized), False if `mdat` comes first, None if the structure couldn't
+    be determined (unusual/corrupt file — callers should treat that as "we
+    don't know, offer to optimize anyway" rather than as either answer).
+
+    Walks top-level ISO-BMFF boxes by their declared sizes (seeking past
+    each payload rather than scanning bytes) so a `moov`/`mdat` string that
+    happened to appear *inside* some other box's payload can't produce a
+    false match.
+    """
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as f:
+            pos = 0
+            while pos + 8 <= size:
+                f.seek(pos)
+                header = f.read(8)
+                if len(header) < 8:
+                    break
+                box_size = int.from_bytes(header[0:4], "big")
+                box_type = header[4:8]
+                header_len = 8
+                if box_size == 1:
+                    ext = f.read(8)
+                    if len(ext) < 8:
+                        break
+                    box_size = int.from_bytes(ext, "big")
+                    header_len = 16
+                if box_type == b"mdat":
+                    return False
+                if box_type == b"moov":
+                    return True
+                if box_size == 0:
+                    break  # box runs to EOF — nothing follows it
+                if box_size < header_len:
+                    break  # malformed
+                pos += box_size
+    except OSError:
+        return None
+    return None
+
+
+def needs_optimization(path):
+    """Whether the "🚀 Optimizar" button is worth showing for `path`:
+    right extension, and not already confirmed faststart. An
+    undetermined state (None) still counts as "offer it" — worst case
+    the user reruns a remux that was already a no-op."""
+    return is_optimizable(Path(path).name) and is_faststart(path) is not True
+
+
 def optimize_video(path, timeout=1800):
     """Remux `path` in place with +faststart. On any failure the original
     file is left untouched (the failed temp output is discarded, never

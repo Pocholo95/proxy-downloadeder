@@ -67,7 +67,9 @@ def list_dir(root, rel):
             "mtime": st.st_mtime,
             "partial": p.suffix == ".part",
             "kind": None if p.is_dir() else media_kind(p.name),
-            "optimizable": (not p.is_dir()) and video_optimize.is_optimizable(p.name),
+            # needs_optimization() short-circuits on the extension check
+            # before touching the file, so this is cheap for non-video entries.
+            "optimizable": (not p.is_dir()) and video_optimize.needs_optimization(p),
         })
     rel_norm = "" if target == root else str(target.relative_to(root))
     return rel_norm, entries
