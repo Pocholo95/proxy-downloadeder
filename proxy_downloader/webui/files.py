@@ -10,6 +10,8 @@ import tempfile
 import zipfile
 from pathlib import Path
 
+from . import video_optimize
+
 # Raster/binary media only — no .svg (can carry scripts) and no formats a
 # browser would try to render as markup. Whitelisted server-side too, not
 # just client-side, since this gates what gets served with an *inline*
@@ -65,6 +67,7 @@ def list_dir(root, rel):
             "mtime": st.st_mtime,
             "partial": p.suffix == ".part",
             "kind": None if p.is_dir() else media_kind(p.name),
+            "optimizable": (not p.is_dir()) and video_optimize.is_optimizable(p.name),
         })
     rel_norm = "" if target == root else str(target.relative_to(root))
     return rel_norm, entries

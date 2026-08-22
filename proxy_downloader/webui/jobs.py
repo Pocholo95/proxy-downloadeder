@@ -37,6 +37,7 @@ from ..core.downloader import download_file, download_direct
 from ..proxy import ProxyCache, ProxyPool, fetch_proxy_list
 from ..ui import console
 from ..utils import sanitize_filename
+from . import video_optimize
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 
@@ -465,6 +466,9 @@ class JobManager:
                     item["code"] = code
                 self._persist()
 
+                if ok and code != "cancelled":
+                    self._maybe_optimize(item)
+
             with job.lock:
                 if job.cancel_event.is_set():
                     job.status = "cancelled"
@@ -475,6 +479,21 @@ class JobManager:
             self._persist()
         finally:
             console.file = old_file
+
+    def _maybe_optimize(self, item):
+        """Best-effort faststart remux right after a successful download —
+        never fails the download itself; a video that couldn't be
+        optimized (no ffmpeg, weird container, whatever) is still a
+        perfectly good download, just maybe slower to start streaming."""
+        path = item.get("path")
+        if not path or not video_optimize.is_optimizable(Path(path).name):
+            return
+        try:
+            video_optimize.optimize_video(path)
+        except video_optimize.OptimizeError as e:
+            console.print(f"[yellow]⚠  No se pudo optimizar para streaming ({Path(path).name}): {e}[/yellow]")
+        except Exception as e:
+            console.print(f"[yellow]⚠  Error inesperado optimizando {Path(path).name}: {e}[/yellow]")
 
     def _make_progress_cb(self, job, item):
         def cb(status, **info):
@@ -490,6 +509,8 @@ class JobManager:
                     item["speed_kb"] = info["speed_kb"]
                 if info.get("message"):
                     item["message"] = info["message"]
+                if info.get("path"):
+                    item["path"] = info["path"]
         return cb
 
     def _mk_item(self, provider, file_id, hint_name, dest_dir):
@@ -509,6 +530,7 @@ class JobManager:
             "speed_kb": 0,
             "message": None,
             "code": None,
+            "path": None,
         }
 
     def _build_items(self, job):

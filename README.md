@@ -215,6 +215,16 @@ borrás, y para video/audio/imagen hay **preview in-browser** — click en el
 nombre abre un reproductor con seek (soporta Range) sin descargar nada,
 `Esc` o click afuera para cerrar.
 
+Cada `.mp4`/`.m4v`/`.mov` tiene un botón **"🚀 Optimizar"**: hace
+`ffmpeg -c copy -movflags +faststart`, un *remux* (no transcodifica —
+copia los streams tal cual) que mueve el índice del archivo al principio
+para que el navegador pueda arrancar a reproducir/buscar posición antes de
+tener el archivo completo. Además, **todo video nuevo que termine de
+descargarse por la web UI se optimiza solo** apenas cae al disco — el botón
+manual es para lo que ya tenías descargado de antes. Requiere `ffmpeg` en
+la imagen (ya viene en el `Dockerfile`); si no está disponible, el video
+queda igual de bien, solo sin este empujoncito.
+
 ### Subir archivos
 
 Es la tercera pestaña de "Nueva descarga" (junto a "Archivo / Carpeta" y
@@ -321,7 +331,8 @@ La API REST que usa el frontend (`GET/POST /api/jobs`, `GET /api/jobs/<id>`,
 `POST /api/jobs/<id>/retry`, `DELETE /api/jobs/<id>`,
 `POST /api/jobs/clear-finished`, `GET /api/sites`,
 `POST /api/sites/<nombre>/proxy`, `GET/DELETE /api/files`,
-`GET /api/files/download`, `GET /api/files/preview`, `GET /api/uploads/sites`,
+`GET /api/files/download`, `GET /api/files/preview`, `POST /api/files/optimize`,
+`GET /api/uploads/sites`,
 `POST/DELETE /api/uploads/account/<sitio>`, `GET/POST /api/uploads/folders/<sitio>`,
 `GET/POST /api/uploads/jobs`, `GET/DELETE /api/uploads/jobs/<id>`,
 `POST /api/uploads/clear-finished`) es la misma que consume la página — se

@@ -320,6 +320,7 @@ function fileRow(entry) {
     <td class="dim">${sizeLabel}${entry.partial ? " (incompleto)" : ""}</td>
     <td class="dim">${fmtDate(entry.mtime)}</td>
     <td class="actions">
+      ${entry.optimizable ? `<button class="btn small" data-optimize="${path}">🚀 Optimizar</button>` : ""}
       ${entry.is_dir ? "" : `<button class="btn small" data-upload-existing="${path}" data-upload-name="${entry.name}">⬆ Subir</button>`}
       <button class="btn small" data-download="${path}">Descargar${entry.is_dir ? " (.zip)" : ""}</button>
       <button class="btn small danger" data-delete="${path}" data-name="${entry.name}">Borrar</button>
@@ -344,6 +345,22 @@ async function loadFiles(path) {
     });
     els.filesList.querySelectorAll("button[data-preview]").forEach((btn) => {
       btn.addEventListener("click", () => openPreview(btn.dataset.preview, btn.dataset.kind));
+    });
+    els.filesList.querySelectorAll("button[data-optimize]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        btn.textContent = "Optimizando…";
+        try {
+          await fetchJSON("/api/files/optimize", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ path: btn.dataset.optimize }),
+          });
+        } catch (err) {
+          alert(`No se pudo optimizar: ${err.message}`);
+        }
+        loadFiles(state.filesPath);
+      });
     });
     els.filesList.querySelectorAll("button[data-upload-existing]").forEach((btn) => {
       btn.addEventListener("click", () => {

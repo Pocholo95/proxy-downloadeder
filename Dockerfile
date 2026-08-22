@@ -2,6 +2,12 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# ffmpeg: used only for a lossless remux (-c copy -movflags +faststart) that
+# relocates an MP4's moov atom to the front so the browser can stream/seek
+# it before the whole file has downloaded — no video/audio re-encoding.
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt requirements-webui.txt ./
 RUN pip install --no-cache-dir -r requirements-webui.txt
 

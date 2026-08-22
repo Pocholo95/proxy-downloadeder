@@ -12,6 +12,7 @@ from werkzeug.utils import secure_filename
 from .. import sites  # noqa: F401  (import triggers site provider registration)
 from . import files as files_api
 from . import upload_sites
+from . import video_optimize
 from .jobs import JobManager
 from .upload_jobs import UploadManager
 
@@ -178,6 +179,23 @@ def api_preview_file():
     # conditional=True (Flask's default) enables Range requests, needed for
     # video/audio seeking — inline, not attachment, so it renders in-page.
     return send_file(path, as_attachment=False, conditional=True)
+
+
+@app.post("/api/files/optimize")
+def api_optimize_file():
+    data = request.get_json(silent=True) or {}
+    rel = data.get("path", "")
+    try:
+        target = files_api.safe_path(OUTPUT_DIR, rel)
+    except files_api.UnsafePath:
+        return jsonify({"error": "invalid path"}), 400
+    if not target.is_file():
+        return jsonify({"error": "not found"}), 404
+    try:
+        video_optimize.optimize_video(target)
+    except video_optimize.OptimizeError as e:
+        return jsonify({"error": str(e)}), 500
+    return jsonify({"ok": True})
 
 
 @app.get("/api/uploads/sites")
