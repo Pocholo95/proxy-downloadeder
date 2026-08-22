@@ -74,6 +74,7 @@ main {
 .field-row .field { min-width: 180px; }
 
 label { font-size: 0.8rem; color: var(--dim); }
+.field-hint { font-size: 0.72rem; color: var(--dim); }
 
 input[type=text], input[type=number], select, textarea {
   background: #0c0e14;

@@ -22,6 +22,7 @@ proxy_downloader/
     mega.py                     sitio con descifrado del lado del cliente (caso avanzado+)
     fichier.py                   sitio con countdown server-side + cookies de sesión (caso avanzado)
     gofile.py                     sitio con cuenta guest + token anti-scraping (caso avanzado)
+    fileditch.py                   sitio con proof-of-work + link firmado ofuscado en JS (caso avanzado)
   webui/                      Flask + job manager en background — ver Web UI / Docker más abajo
 webui.py                    punto de entrada del servidor web (interfaz)
 ```
@@ -40,6 +41,7 @@ python downloader.py -f https://mega.nz/file/XXXXXXXX#clave
 python downloader.py -f https://1fichier.com/?XXXXXXXXX
 python downloader.py -f https://gofile.io/d/XXXXXXX      # archivo suelto
 python downloader.py -F https://gofile.io/d/XXXXXXX      # o carpeta — mismo link, se detecta solo
+python downloader.py -f https://fileditchfiles.st/XXXXXXX/XXXXXXX/nombre.ext
 python downloader.py -F https://pixeldrain.com/l/XXXXXXX
 python downloader.py -b lista.txt          # batch, puede mezclar sitios distintos
 python downloader.py --list-sites          # ver sitios y si usan proxy por defecto
@@ -88,6 +90,17 @@ individuales se van marcando `# [OK]` / `# [FAILED]` como siempre.
 >   (y viceversa no aplica: `-F` sobre un archivo suelto lo baja igual,
 >   adentro de una subcarpeta con el nombre del id). No soporta contenido con
 >   contraseña.
+> - FileDitch no tiene carpetas — solo `-f`. Cada link pide resolver un
+>   desafío proof-of-work (hashcash: buscar un nonce cuyo SHA-256 tenga N
+>   bits en cero) antes de entregar el link real, firmado y con expiración
+>   corta — por eso se resuelve de cero en cada intento, igual que Mediafire.
+>   No es una cuenta ni un login, solo cómputo (bien barato, <1s), así que no
+>   hace falta nada especial de tu lado.
+> - **Filester** (filester.gg) se evaluó pero no se implementó: el paso de
+>   descarga final está detrás de DataDome (WAF anti-bot comercial), no algo
+>   que se pueda resolver con cómputo local como el proof-of-work de
+>   FileDitch — no es confiable de automatizar con `requests` y probablemente
+>   empeora con proxies gratis (mala reputación de IP).
 
 El sitio se detecta automáticamente por el dominio de la URL (o, si es un ID
 suelto, se usa el sitio marcado como default). No hace falta pasar `--site`.
@@ -96,11 +109,19 @@ suelto, se usa el sitio marcado como default). No hace falta pasar `--site`.
 
 Cada sitio trae un default (`use_proxy_by_default` en su clase). Pixeldrain,
 Mega y Gofile lo usan por defecto (banean/limitan agresivo por IP en su tier
-gratis/guest); Mediafire y 1fichier no — Mediafire porque sus links de CDN no
-están rate-limited de esa forma, 1fichier porque activamente bloquea IPs de
-datacenter/proxy (justo lo que son los proxies gratis de esta lista). En un
-batch mixto, cada archivo usa el modo de su propio sitio automáticamente —
-vas a ver `(proxy)` o `(direct)` en la salida por cada uno.
+gratis/guest); Mediafire, 1fichier y FileDitch no — Mediafire y FileDitch
+porque sus links de CDN no están rate-limited de esa forma (el
+proof-of-work de FileDitch frena scraping masivo, no una descarga puntual),
+1fichier porque activamente bloquea IPs de datacenter/proxy (justo lo que
+son los proxies gratis de esta lista). En un batch mixto, cada archivo usa
+el modo de su propio sitio automáticamente — vas a ver `(proxy)` o
+`(direct)` en la salida por cada uno.
+
+**Velocidad mínima** (`--speed`, default 1500 KB/s): solo aplica cuando la
+descarga va **con proxy** — si un proxy cae por debajo de eso, se
+descarta y rota al siguiente. Sin proxy (`--no-proxy`, o un sitio con
+`use_proxy_by_default = False`) no hay a qué rotar, así que este chequeo no
+corre.
 
 Hay tres niveles, de más a menos prioridad:
 
@@ -298,7 +319,7 @@ Con eso alcanza: la rotación de proxies, el resume, el chequeo de velocidad,
 el modo batch y el modo carpeta ya funcionan solos para el sitio nuevo — todo
 eso vive en `core/downloader.py` y no depende de ningún sitio en particular.
 
-Cinco ejemplos reales para copiar según tu caso:
+Seis ejemplos reales para copiar según tu caso:
 - `proxy_downloader/sites/pixeldrain.py` — sitio simple, URL de descarga fija,
   proxy activado por defecto.
 - `proxy_downloader/sites/mediafire.py` — sitio que necesita scrapear la
@@ -323,3 +344,9 @@ Cinco ejemplos reales para copiar según tu caso:
   diga la API; requiere una cuenta "guest" (token) más un segundo header
   anti-scraping calculado localmente, ambos cacheados en la instancia del
   provider y reusados en cada archivo.
+- `proxy_downloader/sites/fileditch.py` — sitio con un desafío
+  proof-of-work del lado del cliente (hashcash: SHA-256 con N bits en cero,
+  resuelto en Python) antes de cada descarga, y el link real (firmado, con
+  expiración) ofuscado en un array de JS que hay que reconstruir con regex
+  en vez de un simple scrape de HTML — el ejemplo de "el link no está en un
+  atributo, hay que parsear código".
