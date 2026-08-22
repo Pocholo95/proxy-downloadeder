@@ -470,7 +470,7 @@ function renderUploadSiteChecks() {
   els.uploadSiteChecks.innerHTML = state.uploadSites.map((s) => `
     <label class="upload-site-check">
       <input type="checkbox" data-site-check="${s.site}" ${state.uploadSelectedSites.has(s.site) ? "checked" : ""}>
-      ${s.label}${s.needs_account ? (s.configured ? " ✓" : " (necesita cuenta)") : ""}
+      ${s.label}${s.needs_account ? (s.configured ? " ✓" : " (necesita cuenta)") : (s.account_optional && s.configured ? " ✓" : "")}
     </label>`
   ).join("");
   els.uploadSiteChecks.querySelectorAll("input[data-site-check]").forEach((cb) => {
@@ -516,9 +516,9 @@ function uploadAccountBlockHTML(info) {
     ` : `
       <div class="field-row">
         <div class="field">
-          <label>Token de cuenta</label>
+          <label>Token de cuenta${info.account_optional ? " (opcional)" : ""}</label>
           <input type="password" data-token-input="${info.site}" placeholder="pegá tu token">
-          <span class="field-hint">Se guarda en el servidor, nunca se vuelve a mostrar</span>
+          <span class="field-hint">${info.account_optional ? "Sin token sube como invitado (link expira a los ~10 días de inactividad). Cargá un token para elegir carpeta y que quede permanente. " : ""}Se guarda en el servidor, nunca se vuelve a mostrar</span>
         </div>
         <div class="field">
           <label>&nbsp;</label>
@@ -533,7 +533,7 @@ function uploadAccountBlockHTML(info) {
 function renderUploadAccountBlocks() {
   const blocks = [...state.uploadSelectedSites]
     .map(siteInfo)
-    .filter((info) => info && info.needs_account);
+    .filter((info) => info && (info.needs_account || info.account_optional));
 
   els.uploadAccountBlocks.innerHTML = blocks.map(uploadAccountBlockHTML).join("");
 

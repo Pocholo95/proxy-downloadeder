@@ -1,6 +1,9 @@
-"""Upload clients for the 3 sites that support it from the web UI: Gofile
-and Bunkr (real user account + folder/album selection) and FileDitch
-(anonymous, no account, no folders — see its section for why).
+"""Upload clients for the sites that support it from the web UI: Bunkr and
+Filester (real user account required, folder/album selection), Gofile
+(account optional — anonymous guest upload works, a token additionally
+unlocks folder targeting and makes the upload permanent instead of
+expiring after ~10 days of inactivity), and FileDitch (always anonymous,
+no account, no folders — see its section for why).
 
 Every function takes credentials explicitly rather than reading site_prefs
 itself — the caller (upload_jobs.py) owns persistence, this stays a plain
@@ -114,14 +117,18 @@ def gofile_create_folder(token, parent_id, name):
 
 
 def gofile_upload(token, path, folder_id=None):
+    """`token` is optional — without one this uploads to a temporary guest
+    account (link works, but expires after ~10 days of inactivity and can't
+    target a folder). Passing a token makes it permanent and folder-aware."""
     fields = {}
-    if folder_id:
+    if folder_id and token:
         fields["folderId"] = (None, folder_id)
+    headers = {"User-Agent": USER_AGENT}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     with open(path, "rb") as f:
         fields["file"] = (Path(path).name, f, mimetypes.guess_type(path)[0] or "application/octet-stream")
-        r = requests.post(_GOFILE_UPLOAD, files=fields,
-                           headers={"Authorization": f"Bearer {token}", "User-Agent": USER_AGENT},
-                           timeout=None)
+        r = requests.post(_GOFILE_UPLOAD, files=fields, headers=headers, timeout=None)
     try:
         data = r.json()
     except ValueError:
@@ -330,7 +337,8 @@ def fileditch_upload(path):
 SITES = {
     "gofile": {
         "label": "Gofile",
-        "needs_account": True,
+        "needs_account": False,
+        "account_optional": True,
         "has_folders": True,
         "verify": gofile_verify,
         "list_folders": gofile_list_folders,

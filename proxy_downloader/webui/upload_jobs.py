@@ -89,6 +89,7 @@ class UploadManager:
                 "site": name,
                 "label": info["label"],
                 "needs_account": info["needs_account"],
+                "account_optional": info.get("account_optional", False),
                 "has_folders": info["has_folders"],
                 "configured": bool(creds),
                 "account_label": (creds or {}).get("label"),
@@ -99,7 +100,7 @@ class UploadManager:
         info = upload_sites.SITES.get(site)
         if not info:
             raise ValueError("Sitio desconocido")
-        if not info["needs_account"]:
+        if not info["needs_account"] and not info.get("account_optional"):
             raise ValueError("Este sitio no usa cuenta")
         token = (token or "").strip()
         if not token:
@@ -247,11 +248,12 @@ class UploadManager:
         info = upload_sites.SITES[job.site]
         try:
             token = None
-            if info["needs_account"]:
+            if info["needs_account"] or info.get("account_optional"):
                 creds = site_prefs.get_upload_account(job.site)
-                if not creds:
+                if info["needs_account"] and not creds:
                     raise upload_sites.UploadError("La cuenta de este sitio ya no está configurada")
-                token = creds["token"]
+                if creds:
+                    token = creds["token"]
             url = info["upload"](token, job.source_path, job.dest_folder_id)
         except upload_sites.UploadError as e:
             with job.lock:

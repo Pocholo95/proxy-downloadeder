@@ -237,11 +237,14 @@ tildaste en un solo click; source es un archivo ya descargado (botón "⬆
 Subir" en cada fila de "Archivos", que te lleva directo a esta pestaña con
 el archivo ya elegido) o uno nuevo desde el dispositivo.
 
-Gofile, Bunkr y Filester usan tu propia cuenta: al tildarlos aparece un
-bloque para pegar el token (se verifica y se guarda en
-`config/<sitio>.json`, nunca se vuelve a mostrar en la UI) y elegir o crear
-la carpeta/álbum destino — cada sitio tildado tiene su propio bloque, así
-que podés mandar a distintas carpetas en cada uno. FileDitch no tiene
+Bunkr y Filester requieren cuenta: al tildarlos aparece un bloque para
+pegar el token (se verifica y se guarda en `config/<sitio>.json`, nunca se
+vuelve a mostrar en la UI) y elegir o crear la carpeta/álbum destino — cada
+sitio tildado tiene su propio bloque, así que podés mandar a distintas
+carpetas en cada uno. Gofile tiene cuenta **opcional**: sin token sube como
+invitado (link funciona igual, pero expira a los ~10 días de inactividad y
+no podés elegir carpeta); cargando un token queda permanente y con
+selector de carpeta, igual que Bunkr/Filester. FileDitch no tiene
 cuentas ni carpetas: sube anónimo, cada archivo es un link suelto
 independiente.
 
