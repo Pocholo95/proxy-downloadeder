@@ -157,7 +157,7 @@ textarea { resize: vertical; font-family: ui-monospace, monospace; font-size: 0.
 }
 
 .badge.queued { background: #2a2f3d; color: var(--dim); }
-.badge.resolving, .badge.fetching_proxies, .badge.running { background: #2a3450; color: var(--accent); }
+.badge.resolving, .badge.fetching_proxies, .badge.running, .badge.uploading { background: #2a3450; color: var(--accent); }
 .badge.cancelling { background: #3a2e14; color: var(--yellow); }
 .badge.done { background: #123326; color: var(--green); }
 .badge.done_with_errors { background: #3a2e14; color: var(--yellow); }
@@ -243,6 +243,42 @@ pre.log {
 }
 
 .preview-close:hover { color: white; }
+
+.account-row { display: flex; align-items: center; gap: 10px; }
+.inline-form { display: flex; gap: 6px; }
+.inline-form input { flex: 1; }
+
+.uploads-jobs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 20px;
+  margin-bottom: 8px;
+}
+.uploads-jobs-head h3 { margin: 0; font-size: 0.9rem; }
+
+.upload-job {
+  background: #0c0e14;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+.upload-job-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 0.82rem;
+}
+.upload-job-name { word-break: break-all; }
+.upload-job-sub { color: var(--dim); font-size: 0.72rem; margin-top: 4px; word-break: break-word; }
+.upload-job-sub a { color: var(--accent); word-break: break-all; }
+.upload-job-actions { margin-top: 6px; display: flex; gap: 8px; }
+
+select {
+  width: 100%;
+}
 
 @media (max-width: 640px) {
   header { padding: 16px 16px 4px; }

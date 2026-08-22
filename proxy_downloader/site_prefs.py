@@ -67,3 +67,26 @@ def clear_override(name):
     data = _load(name)
     data["use_proxy"] = None
     _save(name, data)
+
+
+# ── upload account credentials (webui only — CLI never reads/writes this) ──
+# Stored in the same config/<name>.json file, under "upload_account". Kept
+# out of _DEFAULTS/sync_config_file on purpose: unlike use_proxy, most sites
+# don't have one, and we don't want a stub {} written for sites that don't
+# support uploads at all.
+
+def get_upload_account(name):
+    """The saved credentials dict for this site's upload account, or None."""
+    return _load(name).get("upload_account")
+
+
+def set_upload_account(name, creds):
+    data = _load(name)
+    data["upload_account"] = creds
+    _save(name, data)
+
+
+def clear_upload_account(name):
+    data = _load(name)
+    data.pop("upload_account", None)
+    _save(name, data)

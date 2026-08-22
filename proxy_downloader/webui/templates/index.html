@@ -77,6 +77,66 @@ https://1fichier.com/?XXXXXXXXX"></textarea>
       </div>
     </section>
 
+    <section class="card" id="uploads-card">
+      <h2>Subir archivos
+        <button type="button" class="btn small" id="toggle-uploads">mostrar/ocultar</button>
+      </h2>
+      <div id="uploads-panel" class="hidden">
+        <div class="tabs" id="upload-site-tabs"></div>
+
+        <div id="upload-account-block">
+          <div class="field-row">
+            <div class="field hidden" id="upload-account-configured">
+              <label>Cuenta</label>
+              <div class="account-row">
+                <span class="dim" id="upload-account-label"></span>
+                <button type="button" class="btn small danger" id="upload-account-remove">Quitar</button>
+              </div>
+            </div>
+            <div class="field" id="upload-account-form">
+              <label for="upload-token">Token de cuenta</label>
+              <input type="password" id="upload-token" placeholder="pegá tu token">
+              <span class="field-hint" id="upload-token-hint"></span>
+            </div>
+            <div class="field" id="upload-account-save-field">
+              <label>&nbsp;</label>
+              <button type="button" class="btn" id="upload-account-save">Guardar y verificar</button>
+            </div>
+          </div>
+          <span class="error-msg" id="upload-account-error"></span>
+        </div>
+
+        <div class="field-row hidden" id="upload-folder-row">
+          <div class="field">
+            <label for="upload-folder">Carpeta / álbum destino</label>
+            <select id="upload-folder"></select>
+          </div>
+          <div class="field">
+            <label for="upload-new-folder">Crear nueva</label>
+            <div class="inline-form">
+              <input type="text" id="upload-new-folder" placeholder="nombre">
+              <button type="button" class="btn small" id="upload-create-folder">Crear</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="field" id="upload-source-block">
+          <label for="upload-file-input">Archivo(s) desde este dispositivo</label>
+          <input type="file" id="upload-file-input" multiple>
+          <div id="upload-selected-existing" class="hidden field-hint"></div>
+        </div>
+
+        <button type="button" class="btn primary" id="upload-submit">Subir</button>
+        <span class="error-msg" id="upload-form-error"></span>
+
+        <div class="uploads-jobs-head">
+          <h3>Subidas</h3>
+          <button type="button" class="btn small" id="upload-clear-finished">limpiar completados</button>
+        </div>
+        <div id="upload-jobs-list"><p class="dim">Sin subidas todavía.</p></div>
+      </div>
+    </section>
+
     <section class="card">
       <h2>Trabajos
         <button type="button" class="btn small" id="clear-finished">limpiar completados</button>

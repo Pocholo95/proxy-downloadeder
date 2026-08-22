@@ -205,6 +205,26 @@ borrás, y para video/audio/imagen hay **preview in-browser** — click en el
 nombre abre un reproductor con seek (soporta Range) sin descargar nada,
 `Esc` o click afuera para cerrar.
 
+### Subir archivos
+
+La sección "Subir archivos" sube a **Gofile**, **Bunkr** o **FileDitch** —
+un archivo ya descargado (botón "⬆ Subir" en cada fila de "Archivos") o uno
+nuevo directo desde el dispositivo. Gofile y Bunkr usan tu propia cuenta
+(pegás el token una vez, se verifica y se guarda en `config/<sitio>.json` —
+nunca se vuelve a mostrar en la UI) y te dejan elegir o crear la carpeta/álbum
+destino. FileDitch no tiene cuentas ni carpetas: sube anónimo, cada archivo
+es un link suelto independiente.
+
+De dónde sale cada token:
+- **Gofile**: perfil de tu cuenta en gofile.io (API token / account token).
+- **Bunkr**: `dash.bunkr.cr/dashboard`, configuración de tu cuenta. La API
+  del dashboard puede tener el alta pública cerrada según el momento
+  (`enableUserAccounts`) — si no tenías cuenta previa, puede que el token no
+  esté disponible todavía; con una cuenta existente debería andar igual.
+
+Las subidas también tienen su propio historial persistente (`state/uploads.json`)
+con "limpiar completados", igual que las descargas.
+
 ```bash
 docker network create proxy   # una vez, salvo que ya tengas una red externa "proxy" (p. ej. la que usa tu Traefik)
 docker compose up -d --build
@@ -279,8 +299,11 @@ La API REST que usa el frontend (`GET/POST /api/jobs`, `GET /api/jobs/<id>`,
 `POST /api/jobs/<id>/retry`, `DELETE /api/jobs/<id>`,
 `POST /api/jobs/clear-finished`, `GET /api/sites`,
 `POST /api/sites/<nombre>/proxy`, `GET/DELETE /api/files`,
-`GET /api/files/download`, `GET /api/files/preview`) es la misma que
-consume la página — se puede scriptear igual.
+`GET /api/files/download`, `GET /api/files/preview`, `GET /api/uploads/sites`,
+`POST/DELETE /api/uploads/account/<sitio>`, `GET/POST /api/uploads/folders/<sitio>`,
+`GET/POST /api/uploads/jobs`, `GET/DELETE /api/uploads/jobs/<id>`,
+`POST /api/uploads/clear-finished`) es la misma que consume la página — se
+puede scriptear igual.
 
 ## Agregar un sitio nuevo
 

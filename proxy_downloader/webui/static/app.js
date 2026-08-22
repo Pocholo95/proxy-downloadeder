@@ -3,6 +3,11 @@ const state = {
   openLogs: new Set(),
   filesOpen: false,
   filesPath: "",
+  uploadOpen: false,
+  uploadSite: "gofile",
+  uploadSites: [],
+  uploadFolders: [],
+  uploadSelectedExisting: null, // path of an already-downloaded file picked for upload
 };
 
 const els = {
@@ -28,6 +33,30 @@ const els = {
   previewModal: document.getElementById("preview-modal"),
   previewContent: document.getElementById("preview-content"),
   previewClose: document.getElementById("preview-close"),
+  uploadsCard: document.getElementById("uploads-card"),
+  toggleUploads: document.getElementById("toggle-uploads"),
+  uploadsPanel: document.getElementById("uploads-panel"),
+  uploadSiteTabs: document.getElementById("upload-site-tabs"),
+  uploadAccountConfigured: document.getElementById("upload-account-configured"),
+  uploadAccountLabel: document.getElementById("upload-account-label"),
+  uploadAccountRemove: document.getElementById("upload-account-remove"),
+  uploadAccountForm: document.getElementById("upload-account-form"),
+  uploadAccountSaveField: document.getElementById("upload-account-save-field"),
+  uploadToken: document.getElementById("upload-token"),
+  uploadTokenHint: document.getElementById("upload-token-hint"),
+  uploadAccountSave: document.getElementById("upload-account-save"),
+  uploadAccountError: document.getElementById("upload-account-error"),
+  uploadAccountBlock: document.getElementById("upload-account-block"),
+  uploadFolderRow: document.getElementById("upload-folder-row"),
+  uploadFolder: document.getElementById("upload-folder"),
+  uploadNewFolder: document.getElementById("upload-new-folder"),
+  uploadCreateFolder: document.getElementById("upload-create-folder"),
+  uploadFileInput: document.getElementById("upload-file-input"),
+  uploadSelectedExistingEl: document.getElementById("upload-selected-existing"),
+  uploadSubmit: document.getElementById("upload-submit"),
+  uploadFormError: document.getElementById("upload-form-error"),
+  uploadJobsList: document.getElementById("upload-jobs-list"),
+  uploadClearFinished: document.getElementById("upload-clear-finished"),
 };
 
 els.tabs.forEach((tab) => {
@@ -288,6 +317,7 @@ function fileRow(entry) {
     <td class="dim">${sizeLabel}${entry.partial ? " (incompleto)" : ""}</td>
     <td class="dim">${fmtDate(entry.mtime)}</td>
     <td class="actions">
+      ${entry.is_dir ? "" : `<button class="btn small" data-upload-existing="${path}" data-upload-name="${entry.name}">⬆ Subir</button>`}
       <button class="btn small" data-download="${path}">Descargar${entry.is_dir ? " (.zip)" : ""}</button>
       <button class="btn small danger" data-delete="${path}" data-name="${entry.name}">Borrar</button>
     </td>
@@ -311,6 +341,15 @@ async function loadFiles(path) {
     });
     els.filesList.querySelectorAll("button[data-preview]").forEach((btn) => {
       btn.addEventListener("click", () => openPreview(btn.dataset.preview, btn.dataset.kind));
+    });
+    els.filesList.querySelectorAll("button[data-upload-existing]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        state.uploadSelectedExisting = { path: btn.dataset.uploadExisting, name: btn.dataset.uploadName };
+        renderUploadSelectedExisting();
+        state.uploadOpen = true;
+        els.uploadsPanel.classList.remove("hidden");
+        els.uploadsCard.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
     });
     els.filesList.querySelectorAll("button[data-download]").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -368,7 +407,242 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closePreview();
 });
 
+// ── Uploads ──────────────────────────────────────────────────────────────
+
+function currentUploadSiteInfo() {
+  return state.uploadSites.find((s) => s.site === state.uploadSite) || null;
+}
+
+function renderUploadSelectedExisting() {
+  if (!state.uploadSelectedExisting) {
+    els.uploadSelectedExistingEl.classList.add("hidden");
+    els.uploadSelectedExistingEl.innerHTML = "";
+    return;
+  }
+  els.uploadSelectedExistingEl.classList.remove("hidden");
+  els.uploadSelectedExistingEl.innerHTML =
+    `Vas a subir: <strong>${state.uploadSelectedExisting.name}</strong> (ya descargado) ` +
+    `<button type="button" class="btn small" id="upload-selected-clear">quitar</button>`;
+  document.getElementById("upload-selected-clear").addEventListener("click", () => {
+    state.uploadSelectedExisting = null;
+    renderUploadSelectedExisting();
+  });
+}
+
+function renderUploadSiteTabs() {
+  els.uploadSiteTabs.innerHTML = state.uploadSites.map((s) =>
+    `<button type="button" class="tab ${s.site === state.uploadSite ? "active" : ""}" data-upload-site="${s.site}">${s.label}</button>`
+  ).join("");
+  els.uploadSiteTabs.querySelectorAll("button[data-upload-site]").forEach((btn) => {
+    btn.addEventListener("click", () => selectUploadSite(btn.dataset.uploadSite));
+  });
+}
+
+function updateAccountAndFolderUI() {
+  const info = currentUploadSiteInfo();
+  if (!info) return;
+  els.uploadAccountError.textContent = "";
+
+  if (!info.needs_account) {
+    els.uploadAccountBlock.classList.add("hidden");
+    els.uploadFolderRow.classList.add("hidden");
+    return;
+  }
+  els.uploadAccountBlock.classList.remove("hidden");
+  els.uploadTokenHint.textContent = `Token de tu cuenta de ${info.label} (se guarda en el servidor, nunca se vuelve a mostrar)`;
+
+  if (info.configured) {
+    els.uploadAccountConfigured.classList.remove("hidden");
+    els.uploadAccountForm.classList.add("hidden");
+    els.uploadAccountSaveField.classList.add("hidden");
+    els.uploadAccountLabel.textContent = info.account_label || "configurada";
+    if (info.has_folders) {
+      els.uploadFolderRow.classList.remove("hidden");
+      refreshUploadFolders();
+    } else {
+      els.uploadFolderRow.classList.add("hidden");
+    }
+  } else {
+    els.uploadAccountConfigured.classList.add("hidden");
+    els.uploadAccountForm.classList.remove("hidden");
+    els.uploadAccountSaveField.classList.remove("hidden");
+    els.uploadFolderRow.classList.add("hidden");
+  }
+}
+
+function selectUploadSite(site) {
+  state.uploadSite = site;
+  renderUploadSiteTabs();
+  updateAccountAndFolderUI();
+}
+
+async function refreshUploadSites() {
+  try {
+    state.uploadSites = await fetchJSON("/api/uploads/sites");
+    if (!state.uploadSites.some((s) => s.site === state.uploadSite) && state.uploadSites.length) {
+      state.uploadSite = state.uploadSites[0].site;
+    }
+    renderUploadSiteTabs();
+    updateAccountAndFolderUI();
+  } catch (err) {
+    els.uploadSiteTabs.innerHTML = `<span class="error-msg">${err.message}</span>`;
+  }
+}
+
+async function refreshUploadFolders() {
+  try {
+    state.uploadFolders = await fetchJSON(`/api/uploads/folders/${state.uploadSite}`);
+    els.uploadFolder.innerHTML = state.uploadFolders
+      .map((f) => `<option value="${f.id}">${f.name}</option>`)
+      .join("") || `<option value="">(sin carpetas)</option>`;
+  } catch (err) {
+    els.uploadFolder.innerHTML = `<option value="">error: ${err.message}</option>`;
+  }
+}
+
+els.uploadAccountSave.addEventListener("click", async () => {
+  els.uploadAccountError.textContent = "";
+  const token = els.uploadToken.value.trim();
+  if (!token) {
+    els.uploadAccountError.textContent = "Falta el token";
+    return;
+  }
+  els.uploadAccountSave.disabled = true;
+  try {
+    await fetchJSON(`/api/uploads/account/${state.uploadSite}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+    els.uploadToken.value = "";
+    await refreshUploadSites();
+  } catch (err) {
+    els.uploadAccountError.textContent = err.message;
+  } finally {
+    els.uploadAccountSave.disabled = false;
+  }
+});
+
+els.uploadAccountRemove.addEventListener("click", async () => {
+  if (!confirm("¿Quitar la cuenta guardada para este sitio?")) return;
+  await fetch(`/api/uploads/account/${state.uploadSite}`, { method: "DELETE" });
+  await refreshUploadSites();
+});
+
+els.uploadCreateFolder.addEventListener("click", async () => {
+  const name = els.uploadNewFolder.value.trim();
+  if (!name) return;
+  els.uploadCreateFolder.disabled = true;
+  try {
+    const folder = await fetchJSON(`/api/uploads/folders/${state.uploadSite}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    els.uploadNewFolder.value = "";
+    await refreshUploadFolders();
+    els.uploadFolder.value = folder.id;
+  } catch (err) {
+    els.uploadAccountError.textContent = err.message;
+  } finally {
+    els.uploadCreateFolder.disabled = false;
+  }
+});
+
+els.uploadSubmit.addEventListener("click", async () => {
+  els.uploadFormError.textContent = "";
+  const info = currentUploadSiteInfo();
+  if (!info) return;
+  if (info.needs_account && !info.configured) {
+    els.uploadFormError.textContent = "Configurá la cuenta de este sitio primero";
+    return;
+  }
+  const folderId = info.has_folders ? els.uploadFolder.value : null;
+  const folderName = info.has_folders
+    ? (state.uploadFolders.find((f) => f.id === folderId) || {}).name
+    : null;
+  const files = els.uploadFileInput.files;
+
+  if (!files.length && !state.uploadSelectedExisting) {
+    els.uploadFormError.textContent = "Elegí un archivo del dispositivo o uno ya descargado";
+    return;
+  }
+
+  els.uploadSubmit.disabled = true;
+  try {
+    if (state.uploadSelectedExisting) {
+      await fetchJSON("/api/uploads/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          site: state.uploadSite, path: state.uploadSelectedExisting.path,
+          folder_id: folderId, folder_name: folderName,
+        }),
+      });
+      state.uploadSelectedExisting = null;
+      renderUploadSelectedExisting();
+    }
+    for (const file of files) {
+      const form = new FormData();
+      form.append("site", state.uploadSite);
+      if (folderId) form.append("folder_id", folderId);
+      if (folderName) form.append("folder_name", folderName);
+      form.append("file", file);
+      await fetchJSON("/api/uploads/jobs", { method: "POST", body: form });
+    }
+    els.uploadFileInput.value = "";
+    refreshUploadJobs();
+  } catch (err) {
+    els.uploadFormError.textContent = err.message;
+  } finally {
+    els.uploadSubmit.disabled = false;
+  }
+});
+
+function uploadJobCard(job) {
+  const created = new Date(job.created_at * 1000).toLocaleString();
+  const dest = job.dest_folder_name ? ` → ${job.dest_folder_name}` : "";
+  return `<div class="upload-job">
+    <div class="upload-job-row">
+      <span class="upload-job-name">[${job.site}] ${job.source_name}${dest}</span>
+      <span class="badge ${job.status}">${STATUS_LABELS[job.status] || job.status}</span>
+    </div>
+    <div class="upload-job-sub">${created}${job.url ? ` · <a href="${job.url}" target="_blank" rel="noopener">${job.url}</a>` : ""}${job.error ? " · " + job.error : ""}</div>
+    ${job.status === "done" || job.status === "error" ? `<div class="upload-job-actions"><button class="btn small" data-delete-upload="${job.id}">Borrar</button></div>` : ""}
+  </div>`;
+}
+
+async function refreshUploadJobs() {
+  try {
+    const jobs = await fetchJSON("/api/uploads/jobs");
+    els.uploadJobsList.innerHTML = jobs.length
+      ? jobs.map(uploadJobCard).join("")
+      : `<p class="dim">Sin subidas todavía.</p>`;
+    els.uploadJobsList.querySelectorAll("button[data-delete-upload]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        await fetch(`/api/uploads/jobs/${btn.dataset.deleteUpload}`, { method: "DELETE" });
+        refreshUploadJobs();
+      });
+    });
+  } catch (err) {
+    els.uploadJobsList.innerHTML = `<p class="error-msg">${err.message}</p>`;
+  }
+}
+
+els.uploadClearFinished.addEventListener("click", async () => {
+  await fetch("/api/uploads/clear-finished", { method: "POST" });
+  refreshUploadJobs();
+});
+
+els.toggleUploads.addEventListener("click", () => {
+  state.uploadOpen = !state.uploadOpen;
+  els.uploadsPanel.classList.toggle("hidden", !state.uploadOpen);
+});
+
 refreshSites();
 refreshJobs();
+refreshUploadSites();
+refreshUploadJobs();
 setInterval(refreshJobs, 1500);
+setInterval(refreshUploadJobs, 2000);
 setInterval(() => { if (state.filesOpen) loadFiles(state.filesPath); }, 5000);
