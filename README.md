@@ -217,13 +217,20 @@ nombre abre un reproductor con seek (soporta Range) sin descargar nada,
 
 ### Subir archivos
 
-La sección "Subir archivos" sube a **Gofile**, **Bunkr**, **Filester** o
-**FileDitch** — un archivo ya descargado (botón "⬆ Subir" en cada fila de
-"Archivos") o uno nuevo directo desde el dispositivo. Gofile, Bunkr y
-Filester usan tu propia cuenta (pegás el token una vez, se verifica y se
-guarda en `config/<sitio>.json` — nunca se vuelve a mostrar en la UI) y te
-dejan elegir o crear la carpeta/álbum destino. FileDitch no tiene cuentas ni
-carpetas: sube anónimo, cada archivo es un link suelto independiente.
+Es la tercera pestaña de "Nueva descarga" (junto a "Archivo / Carpeta" y
+"Batch"): **Subir**. Marcás uno o más sitios destino —**Gofile**, **Bunkr**,
+**Filester** y/o **FileDitch**— y sube el mismo archivo a todos los que
+tildaste en un solo click; source es un archivo ya descargado (botón "⬆
+Subir" en cada fila de "Archivos", que te lleva directo a esta pestaña con
+el archivo ya elegido) o uno nuevo desde el dispositivo.
+
+Gofile, Bunkr y Filester usan tu propia cuenta: al tildarlos aparece un
+bloque para pegar el token (se verifica y se guarda en
+`config/<sitio>.json`, nunca se vuelve a mostrar en la UI) y elegir o crear
+la carpeta/álbum destino — cada sitio tildado tiene su propio bloque, así
+que podés mandar a distintas carpetas en cada uno. FileDitch no tiene
+cuentas ni carpetas: sube anónimo, cada archivo es un link suelto
+independiente.
 
 De dónde sale cada token:
 - **Gofile**: perfil de tu cuenta en gofile.io (API token / account token).
@@ -235,8 +242,10 @@ De dónde sale cada token:
   diferencia de Gofile y Bunkr, esta API sí está documentada oficialmente
   en `filester.gg/api-docs`, nada reverse-engineered de este lado).
 
-Las subidas también tienen su propio historial persistente (`state/uploads.json`)
-con "limpiar completados", igual que las descargas.
+Las subidas tienen su propio historial persistente (`state/uploads.json`,
+"limpiar completados" igual que las descargas), y una vez que una termina
+bien el link queda ahí con un botón de copiado rápido — no se pierde entre
+recargas ni redeploys del contenedor.
 
 ```bash
 docker network create proxy   # una vez, salvo que ya tengas una red externa "proxy" (p. ej. la que usa tu Traefik)
