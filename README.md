@@ -22,14 +22,14 @@ proxy_downloader/
     mega.py                     sitio con descifrado del lado del cliente (caso avanzado+)
     fichier.py                   sitio con countdown server-side + cookies de sesión (caso avanzado)
     gofile.py                     sitio con cuenta guest + token anti-scraping (caso avanzado)
-  webui/                      Flask + job manager en background (esta rama, no está en main)
-webui.py                    punto de entrada del servidor web (esta rama, no está en main)
+  webui/                      Flask + job manager en background — ver Web UI / Docker más abajo
+webui.py                    punto de entrada del servidor web (interfaz)
 ```
 
-> Esta rama (`docker-webui`) agrega una interfaz web + imagen Docker sobre el
-> mismo motor de descarga. La CLI (`downloader.py`) sigue funcionando igual
-> acá también — ver [Web UI / Docker](#web-ui--docker) más abajo. La rama
-> `main` es la versión CLI-only, sin Flask ni Docker.
+> El foco del proyecto es la **Web UI / Docker** (ver más abajo) — es la
+> forma recomendada de correrlo. La CLI (`downloader.py`) se mantiene
+> funcionando igual, comparte el mismo motor de descarga, pero ya no es el
+> punto de entrada principal.
 
 ## Uso
 
