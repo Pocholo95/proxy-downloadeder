@@ -17,6 +17,7 @@ import re
 import time
 import uuid
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import requests
 
@@ -188,8 +189,14 @@ def bunkr_create_folder(token, _parent_id, name):
 
 
 def _bunkr_upload_server(token):
+    """The node's own URL can carry any path (or none) — the reference
+    client (NTFSvolume/bunkr) discards it entirely and hits "/api" at that
+    origin, rather than appending "/api" to whatever path was returned.
+    Concatenating instead of replacing was producing a wrong, 404ing path
+    for at least some nodes."""
     data = _bunkr_call("GET", "node", token)
-    return data["url"].rstrip("/") + "/api"
+    parts = urlsplit(data["url"])
+    return f"{parts.scheme}://{parts.netloc}/api"
 
 
 def bunkr_upload(token, path, album_id=None):
@@ -211,7 +218,10 @@ def bunkr_upload(token, path, album_id=None):
         result = _json_or_raise(r, "Bunkr")
     else:
         file_uuid = str(uuid.uuid4())
-        chunk_size = _parse_size(info["chunkSize"]["default"]) if info["chunkSize"].get("default") else max_direct
+        # The reference client splits into chunks of chunkSize.max (not
+        # .default) unless the user explicitly overrides it — match that so
+        # dzchunksize matches what the node actually expects per chunk.
+        chunk_size = max_direct
         total = (size + chunk_size - 1) // chunk_size
         with open(path, "rb") as f:
             for index in range(total):
