@@ -237,6 +237,74 @@ def _json_or_raise(response, site, context=None):
     return data
 
 
+# ── Filester ────────────────────────────────────────────────────────────
+# Documented API (https://filester.gg/api-docs), unlike Gofile/Bunkr — no
+# reverse-engineering needed here. Same platform as proxy_downloader/sites/
+# filester.py's *download* side, but the account/upload API lives on a
+# different host (u1.filester.me) and is entirely separate from that
+# module's public, unauthenticated download-resolve flow.
+_FILESTER_API = "https://u1.filester.me/api/v1"
+
+
+def _filester_headers(token):
+    headers = {"User-Agent": USER_AGENT}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+def _filester_call(method, path, token, **kwargs):
+    r = requests.request(method, f"{_FILESTER_API}{path}", headers=_filester_headers(token),
+                          timeout=TIMEOUT, **kwargs)
+    try:
+        data = r.json()
+    except ValueError:
+        raise UploadError(f"Filester: respuesta inesperada (HTTP {r.status_code})")
+    if not data.get("success"):
+        raise UploadError(f"Filester: {data.get('message') or data.get('error') or 'error desconocido'}")
+    return data
+
+
+def filester_verify(token):
+    try:
+        data = _filester_call("GET", "/account", token)
+    except UploadError:
+        raise UploadError("Token inválido o vencido")
+    info = data["data"]
+    return f"{info.get('username', '?')} (#{info.get('id', '?')})", None
+
+
+def filester_list_folders(token, _root=None):
+    data = _filester_call("GET", "/folders", token)
+    return [{"id": f["id"], "name": f["name"]} for f in data.get("data", [])]
+
+
+def filester_create_folder(token, parent_id, name):
+    body = {"name": name}
+    if parent_id:
+        body["parent"] = parent_id
+    data = _filester_call("POST", "/folder", token, json=body)
+    d = data["data"]
+    return d["identifier"], d.get("name", name)
+
+
+def filester_upload(token, path, folder_id=None):
+    headers = _filester_headers(token)
+    if folder_id:
+        headers["X-Folder-ID"] = str(folder_id)
+    mimetype = mimetypes.guess_type(path)[0] or "application/octet-stream"
+    with open(path, "rb") as f:
+        r = requests.post(f"{_FILESTER_API}/upload", files={"file": (Path(path).name, f, mimetype)},
+                           headers=headers, timeout=None)
+    try:
+        data = r.json()
+    except ValueError:
+        raise UploadError(f"Filester: respuesta inesperada al subir (HTTP {r.status_code})")
+    if not data.get("success"):
+        raise UploadError(f"Filester: {data.get('message') or 'error al subir'}")
+    return data["url"]
+
+
 # ── FileDitch ───────────────────────────────────────────────────────────
 # No accounts, no folders — every upload is anonymous and independent (see
 # proxy_downloader/sites/fileditch.py's docstring). Kept here anyway since
@@ -286,5 +354,14 @@ SITES = {
         "list_folders": None,
         "create_folder": None,
         "upload": lambda _token, path, _folder_id=None: fileditch_upload(path),
+    },
+    "filester": {
+        "label": "Filester",
+        "needs_account": True,
+        "has_folders": True,
+        "verify": filester_verify,
+        "list_folders": filester_list_folders,
+        "create_folder": filester_create_folder,
+        "upload": filester_upload,
     },
 }

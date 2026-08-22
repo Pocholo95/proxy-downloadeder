@@ -217,13 +217,13 @@ nombre abre un reproductor con seek (soporta Range) sin descargar nada,
 
 ### Subir archivos
 
-La sección "Subir archivos" sube a **Gofile**, **Bunkr** o **FileDitch** —
-un archivo ya descargado (botón "⬆ Subir" en cada fila de "Archivos") o uno
-nuevo directo desde el dispositivo. Gofile y Bunkr usan tu propia cuenta
-(pegás el token una vez, se verifica y se guarda en `config/<sitio>.json` —
-nunca se vuelve a mostrar en la UI) y te dejan elegir o crear la carpeta/álbum
-destino. FileDitch no tiene cuentas ni carpetas: sube anónimo, cada archivo
-es un link suelto independiente.
+La sección "Subir archivos" sube a **Gofile**, **Bunkr**, **Filester** o
+**FileDitch** — un archivo ya descargado (botón "⬆ Subir" en cada fila de
+"Archivos") o uno nuevo directo desde el dispositivo. Gofile, Bunkr y
+Filester usan tu propia cuenta (pegás el token una vez, se verifica y se
+guarda en `config/<sitio>.json` — nunca se vuelve a mostrar en la UI) y te
+dejan elegir o crear la carpeta/álbum destino. FileDitch no tiene cuentas ni
+carpetas: sube anónimo, cada archivo es un link suelto independiente.
 
 De dónde sale cada token:
 - **Gofile**: perfil de tu cuenta en gofile.io (API token / account token).
@@ -231,6 +231,9 @@ De dónde sale cada token:
   del dashboard puede tener el alta pública cerrada según el momento
   (`enableUserAccounts`) — si no tenías cuenta previa, puede que el token no
   esté disponible todavía; con una cuenta existente debería andar igual.
+- **Filester**: API key de tu cuenta en filester.gg/filester.me (a
+  diferencia de Gofile y Bunkr, esta API sí está documentada oficialmente
+  en `filester.gg/api-docs`, nada reverse-engineered de este lado).
 
 Las subidas también tienen su propio historial persistente (`state/uploads.json`)
 con "limpiar completados", igual que las descargas.
