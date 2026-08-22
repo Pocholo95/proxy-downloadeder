@@ -234,7 +234,11 @@ Cuarta pestaña de "Nueva descarga": pegás la URL de un video (o playlist)
 de YouTube, Twitter/X, Instagram, TikTok, Reddit, Twitch y varios cientos
 de sitios más que soporta [yt-dlp](https://github.com/yt-dlp/yt-dlp), y lo
 descarga con el mejor video+audio disponible, mezclándolos a `.mp4` con
-`ffmpeg` si hace falta.
+`ffmpeg` si hace falta. Incluye `curl_cffi` para que yt-dlp pueda
+impersonar un navegador real cuando el sitio lo exige — varios sitios
+devuelven `403 Forbidden` sin esto (se ve como "the extractor is
+attempting impersonation, but no impersonate target is available" en el
+log); no hace falta ninguna opción extra, yt-dlp lo detecta y lo usa solo.
 
 Es un motor completamente aparte del descargador principal — no pasa por
 los `SiteProvider` ni el proxy pool con rotación por velocidad — pero
