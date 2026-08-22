@@ -9,4 +9,27 @@ services:
       - ${DOWNLOADS_PATH:-./downloads}:/downloads
       - ${CONFIG_PATH:-./config}:/app/config
       - ${STATE_PATH:-./state}:/app/state
+    networks:
+      - proxy
+    labels:
+      # No-op unless TRAEFIK_ENABLE=true is set (stack manager env vars, or
+      # a local .env) — safe default for anyone running this without
+      # Traefik. Requires an external Docker network named "proxy" that
+      # your Traefik is also attached to (create one with
+      # `docker network create proxy` if you don't have it yet).
+      - "traefik.enable=${TRAEFIK_ENABLE:-false}"
+      - "traefik.http.routers.proxy-downloader.rule=Host(`${TRAEFIK_HOST:-downloader.localhost}`)"
+      - "traefik.http.routers.proxy-downloader.entrypoints=${TRAEFIK_ENTRYPOINTS:-websecure}"
+      - "traefik.http.routers.proxy-downloader.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}"
+      - "traefik.http.services.proxy-downloader.loadbalancer.server.port=8080"
+      # This app has no login — anyone who can reach it can start
+      # downloads, and browse/delete anything under /downloads. Uncomment
+      # to restrict it to your LAN/VPN, same pattern as Arcane's own
+      # ipallowlist middleware:
+      # - "traefik.http.middlewares.proxy-downloader-ipallowlist.ipallowlist.sourcerange=10.42.0.0/24"
+      # - "traefik.http.routers.proxy-downloader.middlewares=proxy-downloader-ipallowlist"
     restart: unless-stopped
+
+networks:
+  proxy:
+    external: true

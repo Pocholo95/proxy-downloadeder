@@ -159,6 +159,7 @@ trabajo a la vez, en el mismo orden en que se encolan — igual que ir
 corriendo la CLI repetidas veces.
 
 ```bash
+docker network create proxy   # una vez, salvo que ya tengas una red externa "proxy" (p. ej. la que usa tu Traefik)
 docker compose up -d --build
 ```
 
@@ -178,6 +179,30 @@ manager que lee el compose directo de este repo (Portainer, **Arcane**,
 Dockge, etc. — donde el archivo suele quedar de solo lectura porque viene de
 git), cargá esas mismas variables en la sección de "Environment
 variables"/"Environment" del stack en su UI.
+
+### Traefik
+
+El compose ya trae los labels de Traefik, apagados por defecto
+(`traefik.enable=false`) y controlados por variables de entorno — mismo
+mecanismo que las rutas de arriba, no hace falta tocar el archivo:
+
+```bash
+TRAEFIK_ENABLE=true
+TRAEFIK_HOST=downloader.tudominio.com
+TRAEFIK_ENTRYPOINTS=websecure       # default
+TRAEFIK_CERTRESOLVER=letsencrypt    # default
+```
+
+Requiere que el contenedor esté en la misma red externa que tu Traefik —
+el compose ya lo conecta a una red externa llamada `proxy` (`docker network
+create proxy` si todavía no la tenés; si tu Traefik usa otro nombre de red,
+editá el `docker-compose.yml` local, ahí sí es un valor fijo, no variable).
+
+Esta app no tiene login: cualquiera que llegue a la URL puede lanzar
+descargas y browsear/borrar lo que hay en `/downloads`. Si la exponés por
+Traefik a internet, considerá restringirla con un middleware de IP allowlist
+(hay un ejemplo comentado en el propio `docker-compose.yml`) o dejarla solo
+accesible por VPN/LAN.
 
 Sin `docker compose`:
 
