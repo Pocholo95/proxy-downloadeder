@@ -1,6 +1,7 @@
 const state = {
   kind: "auto",
   openLogs: new Set(),
+  openVideoLogs: new Set(),
   filesOpen: false,
   filesPath: "",
   uploadSites: [],                    // from /api/uploads/sites
@@ -14,8 +15,11 @@ const els = {
   tabs: document.querySelectorAll(".tab"),
   fieldSingle: document.getElementById("field-single"),
   fieldBatch: document.getElementById("field-batch"),
+  fieldVideo: document.getElementById("field-video"),
+  fieldMinSpeed: document.getElementById("field-min-speed"),
   inputSingle: document.getElementById("value-single"),
   inputBatch: document.getElementById("value-batch"),
+  inputVideo: document.getElementById("value-video"),
   outputDir: document.getElementById("output-dir"),
   proxyMode: document.getElementById("proxy-mode"),
   minSpeed: document.getElementById("min-speed"),
@@ -44,6 +48,8 @@ const els = {
   uploadFormError: document.getElementById("upload-form-error"),
   uploadJobsList: document.getElementById("upload-jobs-list"),
   uploadClearFinished: document.getElementById("upload-clear-finished"),
+  videoJobsList: document.getElementById("video-jobs-list"),
+  videoClearFinished: document.getElementById("video-clear-finished"),
 };
 
 els.tabs.forEach((tab) => {
@@ -53,10 +59,13 @@ els.tabs.forEach((tab) => {
     state.kind = tab.dataset.kind;
     const isBatch = state.kind === "batch";
     const isUpload = state.kind === "upload";
+    const isVideo = state.kind === "video";
     els.fieldBatch.classList.toggle("hidden", !isBatch);
-    els.fieldSingle.classList.toggle("hidden", isBatch || isUpload);
+    els.fieldSingle.classList.toggle("hidden", isBatch || isUpload || isVideo);
+    els.fieldVideo.classList.toggle("hidden", !isVideo);
     els.fieldUpload.classList.toggle("hidden", !isUpload);
     els.downloadOptionsRow.classList.toggle("hidden", isUpload);
+    els.fieldMinSpeed.classList.toggle("hidden", isVideo);
     els.submitBtn.textContent = isUpload ? "Subir" : "Descargar";
     if (isUpload) refreshUploadSites();
   });
@@ -122,6 +131,30 @@ els.form.addEventListener("submit", async (e) => {
 
   if (state.kind === "upload") {
     await submitUpload();
+    return;
+  }
+
+  if (state.kind === "video") {
+    const url = els.inputVideo.value.trim();
+    if (!url) {
+      els.formError.textContent = "Falta la URL del video";
+      return;
+    }
+    try {
+      await fetchJSON("/api/ytdlp/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url,
+          output_dir: els.outputDir.value.trim() || null,
+          proxy_mode: els.proxyMode.value,
+        }),
+      });
+      els.inputVideo.value = "";
+      refreshVideoJobs();
+    } catch (err) {
+      els.formError.textContent = err.message;
+    }
     return;
   }
 
@@ -756,10 +789,92 @@ els.uploadClearFinished.addEventListener("click", async () => {
   refreshUploadJobs();
 });
 
+const VIDEO_CANCELLABLE = new Set(["queued", "running"]);
+const VIDEO_DELETABLE = new Set(["done", "error", "cancelled"]);
+
+function videoJobCard(job) {
+  const created = new Date(job.created_at * 1000).toLocaleString();
+  const pct = job.total > 0 ? Math.min(100, (job.bytes_done / job.total) * 100) : (job.status === "done" ? 100 : 0);
+  const fillClass = job.status === "done" ? "done" : job.status === "error" ? "failed" : "";
+  const speed = job.status === "running" ? fmtSpeed(job.speed_kb) : "";
+  const sizeLabel = job.total > 0 ? `${fmtBytes(job.bytes_done)} / ${fmtBytes(job.total)}` : "";
+  const logOpen = state.openVideoLogs.has(job.id);
+  const title = job.title || job.filename || job.url;
+  return `<div class="job" data-video-job="${job.id}">
+    <div class="job-head">
+      <div>
+        <div class="job-title">${title.length > 90 ? title.slice(0, 90) + "…" : title}</div>
+        <div class="job-meta">${created} · salida: ${job.output_dir}${job.error ? " · " + job.error : ""}</div>
+      </div>
+      <span class="badge ${job.status}">${STATUS_LABELS[job.status] || job.status}</span>
+    </div>
+    <div class="item">
+      <div class="item-sub">${sizeLabel} ${speed ? "· " + speed : ""}</div>
+      <div class="progress-bar"><div class="progress-fill ${fillClass}" style="width:${pct}%"></div></div>
+    </div>
+    <div class="job-actions">
+      ${VIDEO_CANCELLABLE.has(job.status) ? `<button class="btn small danger" data-video-cancel="${job.id}" ${job.status === "cancelling" ? "disabled" : ""}>${job.status === "cancelling" ? "Cancelando…" : "Cancelar"}</button>` : ""}
+      ${VIDEO_DELETABLE.has(job.status) ? `<button class="btn small" data-video-delete="${job.id}">Borrar</button>` : ""}
+      <button class="btn small" data-video-toggle-log="${job.id}">${logOpen ? "Ocultar log" : "Ver log"}</button>
+    </div>
+    ${logOpen ? `<pre class="log" id="video-log-${job.id}">cargando…</pre>` : ""}
+  </div>`;
+}
+
+async function refreshVideoJobs() {
+  try {
+    const jobs = await fetchJSON("/api/ytdlp/jobs");
+    els.videoJobsList.innerHTML = jobs.length
+      ? jobs.map(videoJobCard).join("")
+      : `<p class="dim">Sin videos todavía.</p>`;
+
+    els.videoJobsList.querySelectorAll("button[data-video-cancel]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        await fetch(`/api/ytdlp/jobs/${btn.dataset.videoCancel}/cancel`, { method: "POST" });
+        refreshVideoJobs();
+      });
+    });
+    els.videoJobsList.querySelectorAll("button[data-video-delete]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        if (!confirm("¿Borrar este video del historial? No afecta el archivo ya descargado.")) return;
+        await fetch(`/api/ytdlp/jobs/${btn.dataset.videoDelete}`, { method: "DELETE" });
+        refreshVideoJobs();
+      });
+    });
+    els.videoJobsList.querySelectorAll("button[data-video-toggle-log]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.dataset.videoToggleLog;
+        if (state.openVideoLogs.has(id)) state.openVideoLogs.delete(id);
+        else state.openVideoLogs.add(id);
+        refreshVideoJobs();
+      });
+    });
+    for (const id of state.openVideoLogs) {
+      const pre = document.getElementById(`video-log-${id}`);
+      if (!pre) continue;
+      fetch(`/api/ytdlp/jobs/${id}/log`).then((r) => r.text()).then((text) => {
+        const wasAtBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 10;
+        pre.textContent = text || "(sin salida todavía)";
+        if (wasAtBottom) pre.scrollTop = pre.scrollHeight;
+      });
+    }
+  } catch (err) {
+    els.videoJobsList.innerHTML = `<p class="error-msg">${err.message}</p>`;
+  }
+}
+
+els.videoClearFinished.addEventListener("click", async () => {
+  await fetch("/api/ytdlp/clear-finished", { method: "POST" });
+  refreshVideoJobs();
+});
+
 refreshSites();
 refreshJobs();
 refreshUploadSites();
 refreshUploadJobs();
+refreshVideoJobs();
 setInterval(refreshJobs, 1500);
 setInterval(refreshUploadJobs, 2000);
+setInterval(refreshVideoJobs, 1500);
 setInterval(() => { if (state.filesOpen) loadFiles(state.filesPath); }, 5000);

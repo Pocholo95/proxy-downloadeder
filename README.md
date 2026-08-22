@@ -228,6 +228,30 @@ manual es para lo que ya tenías descargado de antes. Requiere `ffmpeg` en
 la imagen (ya viene en el `Dockerfile`); si no está disponible, el video
 queda igual de bien, solo sin este empujoncito.
 
+### Video (yt-dlp)
+
+Cuarta pestaña de "Nueva descarga": pegás la URL de un video (o playlist)
+de YouTube, Twitter/X, Instagram, TikTok, Reddit, Twitch y varios cientos
+de sitios más que soporta [yt-dlp](https://github.com/yt-dlp/yt-dlp), y lo
+descarga con el mejor video+audio disponible, mezclándolos a `.mp4` con
+`ffmpeg` si hace falta.
+
+Es un motor completamente aparte del descargador principal — no pasa por
+los `SiteProvider` ni el proxy pool con rotación por velocidad — pero
+reutiliza la misma carpeta de salida, el mismo desplegable de proxy y el
+mismo pool/caché de proxies (`state/working_proxies.json`) para elegir uno.
+La diferencia real es que acá **no hay rotación**: si elegís "Forzar
+proxy" usa uno solo para toda la descarga (yt-dlp no tiene forma de
+cambiarlo a mitad de camino como sí puede el motor principal); "Auto" y
+"Sin proxy" bajan directo con la IP real. Por eso no tiene el campo de
+velocidad mínima, que no aplica.
+
+Tiene su propio historial ("Videos (yt-dlp)", persistido en
+`state/ytdlp.json`) con progreso en vivo, log completo, cancelar y borrar
+— mismo comportamiento que el resto: cancelar deja el `.part` en disco.
+Todo video que termine de bajar se optimiza para streaming igual que
+cualquier otra descarga (ver más abajo).
+
 ### Subir archivos
 
 Es la tercera pestaña de "Nueva descarga" (junto a "Archivo / Carpeta" y
@@ -342,7 +366,10 @@ La API REST que usa el frontend (`GET/POST /api/jobs`, `GET /api/jobs/<id>`,
 `GET /api/uploads/sites`,
 `POST/DELETE /api/uploads/account/<sitio>`, `GET/POST /api/uploads/folders/<sitio>`,
 `GET/POST /api/uploads/jobs`, `GET/DELETE /api/uploads/jobs/<id>`,
-`POST /api/uploads/clear-finished`) es la misma que consume la página — se
+`POST /api/uploads/clear-finished`, `GET/POST /api/ytdlp/jobs`,
+`GET /api/ytdlp/jobs/<id>`, `GET /api/ytdlp/jobs/<id>/log`,
+`POST /api/ytdlp/jobs/<id>/cancel`, `DELETE /api/ytdlp/jobs/<id>`,
+`POST /api/ytdlp/clear-finished`) es la misma que consume la página — se
 puede scriptear igual.
 
 ## Agregar un sitio nuevo

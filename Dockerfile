@@ -2,9 +2,10 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# ffmpeg: used only for a lossless remux (-c copy -movflags +faststart) that
+# ffmpeg: used for a lossless remux (-c copy -movflags +faststart) that
 # relocates an MP4's moov atom to the front so the browser can stream/seek
-# it before the whole file has downloaded — no video/audio re-encoding.
+# it before the whole file has downloaded (no video/audio re-encoding), and
+# by yt-dlp to mux separately-downloaded video+audio streams into one file.
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 

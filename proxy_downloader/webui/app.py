@@ -15,6 +15,7 @@ from . import upload_sites
 from . import video_optimize
 from .jobs import JobManager
 from .upload_jobs import UploadManager
+from .ytdlp_jobs import YtdlpManager
 
 OUTPUT_DIR = os.environ.get("DOWNLOAD_DIR", "/downloads")
 STATE_DIR = os.environ.get("STATE_DIR", "/app/state")
@@ -23,6 +24,7 @@ UPLOAD_TMP_DIR = os.path.join(STATE_DIR, "upload_tmp")
 app = Flask(__name__)
 manager = JobManager(base_output_dir=OUTPUT_DIR, state_dir=STATE_DIR)
 upload_manager = UploadManager(state_dir=STATE_DIR, tmp_dir=UPLOAD_TMP_DIR)
+ytdlp_manager = YtdlpManager(base_output_dir=OUTPUT_DIR, state_dir=STATE_DIR)
 
 
 @app.get("/")
@@ -321,6 +323,63 @@ def api_delete_upload_job(job_id):
 @app.post("/api/uploads/clear-finished")
 def api_clear_finished_uploads():
     removed = upload_manager.clear_finished()
+    return jsonify({"ok": True, "removed": removed})
+
+
+@app.get("/api/ytdlp/jobs")
+def api_list_ytdlp_jobs():
+    return jsonify([j.to_dict() for j in ytdlp_manager.list_jobs()])
+
+
+@app.post("/api/ytdlp/jobs")
+def api_create_ytdlp_job():
+    data = request.get_json(silent=True) or {}
+    try:
+        job = ytdlp_manager.create_job(data.get("url", ""), output_dir=data.get("output_dir") or None,
+                                        proxy_mode=data.get("proxy_mode", "auto"))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify(job.to_dict()), 201
+
+
+@app.get("/api/ytdlp/jobs/<job_id>")
+def api_get_ytdlp_job(job_id):
+    job = ytdlp_manager.get(job_id)
+    if not job:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(job.to_dict())
+
+
+@app.get("/api/ytdlp/jobs/<job_id>/log")
+def api_get_ytdlp_job_log(job_id):
+    job = ytdlp_manager.get(job_id)
+    if not job:
+        return jsonify({"error": "not found"}), 404
+    return job.log_text(), 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+
+@app.post("/api/ytdlp/jobs/<job_id>/cancel")
+def api_cancel_ytdlp_job(job_id):
+    ok = ytdlp_manager.cancel(job_id)
+    if not ok:
+        return jsonify({"error": "job not cancellable (already finished, or not found)"}), 409
+    return jsonify({"ok": True})
+
+
+@app.delete("/api/ytdlp/jobs/<job_id>")
+def api_delete_ytdlp_job(job_id):
+    try:
+        ok = ytdlp_manager.delete_job(job_id)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 409
+    if not ok:
+        return jsonify({"error": "not found"}), 404
+    return jsonify({"ok": True})
+
+
+@app.post("/api/ytdlp/clear-finished")
+def api_clear_finished_ytdlp():
+    removed = ytdlp_manager.clear_finished()
     return jsonify({"ok": True, "removed": removed})
 
 
