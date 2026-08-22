@@ -262,8 +262,8 @@ class JobManager:
 
     # ── jobs ──
     def create_job(self, kind, value, output_dir=None, proxy_mode="auto", speed=None):
-        if kind not in ("file", "folder", "batch"):
-            raise ValueError("kind must be file, folder or batch")
+        if kind not in ("file", "folder", "batch", "auto"):
+            raise ValueError("kind must be file, folder, batch or auto")
         if not value or not value.strip():
             raise ValueError("value is required")
         if proxy_mode not in ("auto", "proxy", "no-proxy"):
@@ -536,6 +536,25 @@ class JobManager:
             raw_items, _sub_dir = _resolve_folder_jobs(provider, folder_id, out_dir)
             for p, fid, fname, _orig, dest in raw_items:
                 items.append(self._mk_item(p, fid, fname, dest))
+
+        elif job.kind == "auto":
+            # Same precedence as the CLI's interactive/batch auto-detect:
+            # try folder first, fall back to a single file.
+            provider = registry.detect(value)
+            if not provider:
+                job.error = "No se reconoce el sitio para ese ID/URL"
+                return items
+            folder_id = provider.extract_folder_id(value)
+            if folder_id:
+                raw_items, _sub_dir = _resolve_folder_jobs(provider, folder_id, out_dir)
+                for p, fid, fname, _orig, dest in raw_items:
+                    items.append(self._mk_item(p, fid, fname, dest))
+            else:
+                fid = provider.extract_file_id(value)
+                if not fid:
+                    job.error = "ID o URL inválida"
+                    return items
+                items.append(self._mk_item(provider, fid, None, out_dir))
 
         elif job.kind == "batch":
             current_dir = out_dir

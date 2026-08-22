@@ -1,5 +1,5 @@
 const state = {
-  kind: "file",
+  kind: "auto",
   openLogs: new Set(),
   filesOpen: false,
   filesPath: "",
@@ -9,7 +9,6 @@ const els = {
   tabs: document.querySelectorAll(".tab"),
   fieldSingle: document.getElementById("field-single"),
   fieldBatch: document.getElementById("field-batch"),
-  labelSingle: document.querySelector('label[for="value-single"]'),
   inputSingle: document.getElementById("value-single"),
   inputBatch: document.getElementById("value-batch"),
   outputDir: document.getElementById("output-dir"),
@@ -28,15 +27,6 @@ const els = {
   clearFinished: document.getElementById("clear-finished"),
 };
 
-const SINGLE_LABELS = {
-  file: "URL o ID del archivo",
-  folder: "URL o ID de la carpeta",
-};
-const SINGLE_PLACEHOLDERS = {
-  file: "https://pixeldrain.com/u/XXXXXXX",
-  folder: "https://pixeldrain.com/l/XXXXXXX",
-};
-
 els.tabs.forEach((tab) => {
   tab.addEventListener("click", () => {
     els.tabs.forEach((t) => t.classList.remove("active"));
@@ -45,10 +35,6 @@ els.tabs.forEach((tab) => {
     const isBatch = state.kind === "batch";
     els.fieldBatch.classList.toggle("hidden", !isBatch);
     els.fieldSingle.classList.toggle("hidden", isBatch);
-    if (!isBatch) {
-      els.labelSingle.textContent = SINGLE_LABELS[state.kind];
-      els.inputSingle.placeholder = SINGLE_PLACEHOLDERS[state.kind];
-    }
   });
 });
 
