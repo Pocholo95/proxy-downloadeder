@@ -25,6 +25,7 @@ const els = {
   filesBreadcrumb: document.getElementById("files-breadcrumb"),
   toggleFiles: document.getElementById("toggle-files"),
   refreshFiles: document.getElementById("refresh-files"),
+  clearFinished: document.getElementById("clear-finished"),
 };
 
 const SINGLE_LABELS = {
@@ -55,6 +56,12 @@ els.toggleSites.addEventListener("click", () => {
   els.sitesList.classList.toggle("hidden");
 });
 
+els.clearFinished.addEventListener("click", async () => {
+  if (!confirm("¿Borrar del historial todos los trabajos ya terminados? No afecta los archivos descargados.")) return;
+  await fetch("/api/jobs/clear-finished", { method: "POST" });
+  refreshJobs();
+});
+
 function fmtBytes(n) {
   if (!n || n <= 0) return "0 KB";
   const kb = n / 1024;
@@ -75,12 +82,17 @@ const STATUS_LABELS = {
   resolving: "resolviendo",
   fetching_proxies: "cargando proxies",
   running: "descargando",
+  cancelling: "cancelando…",
   done: "completo",
   done_with_errors: "con errores",
   error: "error",
   failed: "falló",
   cancelled: "cancelado",
 };
+
+const CANCELLABLE_STATUSES = new Set(["queued", "resolving", "fetching_proxies", "running"]);
+const RETRYABLE_STATUSES = new Set(["done_with_errors", "error", "cancelled"]);
+const DELETABLE_STATUSES = new Set(["done", "done_with_errors", "error", "cancelled"]);
 
 async function fetchJSON(url, opts) {
   const r = await fetch(url, opts);
@@ -173,6 +185,7 @@ function jobCard(job) {
   const title = job.input.length > 90 ? job.input.slice(0, 90) + "…" : job.input;
   const created = new Date(job.created_at * 1000).toLocaleString();
   const logOpen = state.openLogs.has(job.id);
+  const hasRetryable = job.items.some((it) => it.status === "failed" || it.status === "cancelled");
   return `<div class="job" data-job="${job.id}">
     <div class="job-head">
       <div>
@@ -183,7 +196,9 @@ function jobCard(job) {
     </div>
     <div class="items">${job.items.map(itemProgress).join("")}</div>
     <div class="job-actions">
-      ${job.status === "queued" ? `<button class="btn small danger" data-cancel="${job.id}">Cancelar</button>` : ""}
+      ${CANCELLABLE_STATUSES.has(job.status) ? `<button class="btn small danger" data-cancel="${job.id}" ${job.status === "cancelling" ? "disabled" : ""}>${job.status === "cancelling" ? "Cancelando…" : "Cancelar"}</button>` : ""}
+      ${RETRYABLE_STATUSES.has(job.status) && hasRetryable ? `<button class="btn small" data-retry="${job.id}">Reintentar fallidos</button>` : ""}
+      ${DELETABLE_STATUSES.has(job.status) ? `<button class="btn small" data-delete-job="${job.id}">Borrar</button>` : ""}
       <button class="btn small" data-toggle-log="${job.id}">${logOpen ? "Ocultar log" : "Ver log"}</button>
     </div>
     ${logOpen ? `<pre class="log" id="log-${job.id}">cargando…</pre>` : ""}
@@ -199,7 +214,25 @@ async function refreshJobs() {
 
     els.jobsList.querySelectorAll("button[data-cancel]").forEach((btn) => {
       btn.addEventListener("click", async () => {
+        btn.disabled = true;
         await fetch(`/api/jobs/${btn.dataset.cancel}/cancel`, { method: "POST" });
+        refreshJobs();
+      });
+    });
+    els.jobsList.querySelectorAll("button[data-retry]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        try {
+          await fetchJSON(`/api/jobs/${btn.dataset.retry}/retry`, { method: "POST" });
+        } catch (err) {
+          alert(err.message);
+        }
+        refreshJobs();
+      });
+    });
+    els.jobsList.querySelectorAll("button[data-delete-job]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        if (!confirm("¿Borrar este trabajo del historial? No afecta los archivos ya descargados.")) return;
+        await fetch(`/api/jobs/${btn.dataset.deleteJob}`, { method: "DELETE" });
         refreshJobs();
       });
     });

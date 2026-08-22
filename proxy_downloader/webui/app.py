@@ -80,8 +80,34 @@ def api_get_job_log(job_id):
 def api_cancel_job(job_id):
     ok = manager.cancel(job_id)
     if not ok:
-        return jsonify({"error": "job not cancellable (already running/finished, or not found)"}), 409
+        return jsonify({"error": "job not cancellable (already finished, or not found)"}), 409
     return jsonify({"ok": True})
+
+
+@app.post("/api/jobs/<job_id>/retry")
+def api_retry_job(job_id):
+    try:
+        job = manager.retry_job(job_id)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify(job.to_dict()), 201
+
+
+@app.delete("/api/jobs/<job_id>")
+def api_delete_job(job_id):
+    try:
+        ok = manager.delete_job(job_id)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 409
+    if not ok:
+        return jsonify({"error": "not found"}), 404
+    return jsonify({"ok": True})
+
+
+@app.post("/api/jobs/clear-finished")
+def api_clear_finished():
+    removed = manager.clear_finished()
+    return jsonify({"ok": True, "removed": removed})
 
 
 @app.get("/api/files")

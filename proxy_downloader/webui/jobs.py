@@ -11,7 +11,14 @@ same as running the CLI repeatedly. That keeps the shared `console` redirect
 below (needed so rich's colored/live output doesn't corrupt itself across
 concurrent jobs) trivially safe, and matches the CLI's own behavior of
 downloading one file after another.
+
+Job history (including logs) is persisted to state_dir/jobs.json after every
+meaningful state change, so it survives container restarts/redeploys — any
+job still mid-flight when the process died is reconciled to "error" on the
+next load, since the worker thread that owned it is gone (the partial .part
+file on disk is untouched, so retrying/resubmitting just resumes it).
 """
+import json
 import re
 import sys
 import threading
@@ -32,6 +39,10 @@ from ..ui import console
 from ..utils import sanitize_filename
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
+
+TERMINAL_STATUSES = {"done", "done_with_errors", "error", "cancelled"}
+INFLIGHT_STATUSES = {"queued", "resolving", "fetching_proxies", "running", "cancelling"}
+MAX_HISTORY = 300
 
 
 def _strip_ansi(text):
@@ -79,14 +90,16 @@ class Job:
         self.output_dir = output_dir
         self.proxy_mode = proxy_mode    # "auto" | "proxy" | "no-proxy"
         self.speed = speed
-        self.status = "queued"          # queued|resolving|fetching_proxies|running|done|done_with_errors|error|cancelled
+        self.status = "queued"          # queued|resolving|fetching_proxies|running|cancelling|done|done_with_errors|error|cancelled
         self.error = None
+        self.retry_of = None            # id of the job this one retries, if any
         self.created_at = time.time()
         self.started_at = None
         self.finished_at = None
         self.items = []                 # list[dict], see JobManager._mk_item
         self.log_lines = deque(maxlen=2000)
         self.lock = threading.RLock()
+        self.cancel_event = threading.Event()
 
     def _append_log(self, line):
         if line.strip():
@@ -110,12 +123,33 @@ class Job:
                 "speed": self.speed,
                 "status": self.status,
                 "error": self.error,
+                "retry_of": self.retry_of,
                 "created_at": self.created_at,
                 "started_at": self.started_at,
                 "finished_at": self.finished_at,
                 "items": items,
                 "summary": {"total": len(items), "done": done, "failed": failed},
             }
+
+    def to_persist_dict(self):
+        d = self.to_dict()
+        d["log"] = list(self.log_lines)
+        return d
+
+    @classmethod
+    def from_dict(cls, data):
+        job = cls(data["id"], data["kind"], data["input"], data["output_dir"],
+                   data.get("proxy_mode", "auto"), data.get("speed") or MIN_SPEED_KB)
+        job.status = data.get("status", "error")
+        job.error = data.get("error")
+        job.retry_of = data.get("retry_of")
+        job.created_at = data.get("created_at") or time.time()
+        job.started_at = data.get("started_at")
+        job.finished_at = data.get("finished_at")
+        job.items = data.get("items") or []
+        for line in data.get("log") or []:
+            job._append_log(line)
+        return job
 
     def log_text(self):
         return "\n".join(self.log_lines)
@@ -127,13 +161,16 @@ class JobManager:
         self.state_dir = Path(state_dir)
         self.base_output_dir.mkdir(parents=True, exist_ok=True)
         self.state_dir.mkdir(parents=True, exist_ok=True)
+        self._jobs_file = self.state_dir / "jobs.json"
 
         self.jobs = {}
         self.order = []
+        self._preset_items = {}
         self._meta_lock = threading.Lock()
         self._queue = queue.Queue()
 
         self._ensure_config_files()
+        self._load_persisted_jobs()
 
         self._worker = threading.Thread(target=self._worker_loop, daemon=True, name="job-worker")
         self._worker.start()
@@ -171,6 +208,58 @@ class JobManager:
         else:
             raise ValueError(f"Unknown action: {action}")
 
+    # ── persistence ──
+    def _load_persisted_jobs(self):
+        if not self._jobs_file.exists():
+            return
+        try:
+            payload = json.loads(self._jobs_file.read_text())
+        except Exception:
+            return
+        for jd in payload:
+            try:
+                job = Job.from_dict(jd)
+            except Exception:
+                continue
+            if job.status in INFLIGHT_STATUSES:
+                msg = "Interrumpido (el servidor se reinició)"
+                job.status = "error"
+                job.error = f"{job.error}; {msg}" if job.error else msg
+                job.finished_at = job.finished_at or time.time()
+                for it in job.items:
+                    if it.get("status") in ("queued", "running"):
+                        it["status"] = "failed"
+                        it["message"] = it.get("message") or "Interrumpido"
+            self.jobs[job.id] = job
+            self.order.append(job.id)
+
+    def _persist(self):
+        with self._meta_lock:
+            self._prune_locked()
+            try:
+                payload = [self.jobs[i].to_persist_dict() for i in self.order if i in self.jobs]
+                tmp_path = self._jobs_file.with_suffix(".json.tmp")
+                tmp_path.write_text(json.dumps(payload))
+                tmp_path.replace(self._jobs_file)
+            except Exception:
+                pass
+
+    def _prune_locked(self):
+        """Keep at most MAX_HISTORY jobs, dropping the oldest *finished* ones
+        first — active jobs are never pruned."""
+        excess = len(self.order) - MAX_HISTORY
+        if excess <= 0:
+            return
+        keep = []
+        for jid in self.order:
+            job = self.jobs.get(jid)
+            if excess > 0 and job and job.status in TERMINAL_STATUSES:
+                del self.jobs[jid]
+                excess -= 1
+                continue
+            keep.append(jid)
+        self.order = keep
+
     # ── jobs ──
     def create_job(self, kind, value, output_dir=None, proxy_mode="auto", speed=None):
         if kind not in ("file", "folder", "batch"):
@@ -187,6 +276,7 @@ class JobManager:
         with self._meta_lock:
             self.jobs[job_id] = job
             self.order.append(job_id)
+        self._persist()
         self._queue.put(job_id)
         return job
 
@@ -203,11 +293,70 @@ class JobManager:
         if not job:
             return False
         with job.lock:
-            if job.status != "queued":
+            if job.status == "queued":
+                job.status = "cancelled"
+                job.finished_at = time.time()
+            elif job.status in ("resolving", "fetching_proxies", "running"):
+                job.cancel_event.set()
+                job.status = "cancelling"
+            else:
                 return False
-            job.status = "cancelled"
-            job.finished_at = time.time()
+        self._persist()
         return True
+
+    def delete_job(self, job_id):
+        with self._meta_lock:
+            job = self.jobs.get(job_id)
+            if not job:
+                return False
+            if job.status not in TERMINAL_STATUSES:
+                raise ValueError("Cancelá el trabajo antes de borrarlo")
+            del self.jobs[job_id]
+            self.order.remove(job_id)
+        self._persist()
+        return True
+
+    def clear_finished(self):
+        with self._meta_lock:
+            to_remove = [jid for jid in self.order
+                         if jid in self.jobs and self.jobs[jid].status in TERMINAL_STATUSES]
+            for jid in to_remove:
+                del self.jobs[jid]
+            self.order = [jid for jid in self.order if jid not in to_remove]
+        self._persist()
+        return len(to_remove)
+
+    def retry_job(self, job_id):
+        src = self.jobs.get(job_id)
+        if not src:
+            raise ValueError("Job not found")
+        with src.lock:
+            if src.status not in TERMINAL_STATUSES or src.status == "done":
+                raise ValueError("Solo se puede reintentar un trabajo terminado con fallos")
+            failed_items = [dict(it) for it in src.items if it["status"] in ("failed", "cancelled")]
+        if not failed_items:
+            raise ValueError("No hay items fallidos para reintentar")
+
+        preset = []
+        for it in failed_items:
+            provider = registry.get(it["site"])
+            if not provider:
+                continue
+            preset.append(self._mk_item(provider, it["file_id"], it.get("hint_name"), it["dest_dir"]))
+        if not preset:
+            raise ValueError("No se pudo reconstruir ningún item fallido")
+
+        job_id_new = uuid.uuid4().hex[:12]
+        job = Job(job_id_new, src.kind, src.raw_input, src.output_dir, src.proxy_mode, src.speed)
+        job.retry_of = src.id
+
+        with self._meta_lock:
+            self.jobs[job.id] = job
+            self.order.append(job.id)
+            self._preset_items[job.id] = preset
+        self._persist()
+        self._queue.put(job.id)
+        return job
 
     # ── worker ──
     def _worker_loop(self):
@@ -221,6 +370,7 @@ class JobManager:
                     continue
                 job.status = "resolving"
                 job.started_at = time.time()
+            self._persist()
             try:
                 self._run_job(job)
             except Exception as e:
@@ -229,6 +379,7 @@ class JobManager:
                     job.status = "error"
                     job.error = str(e)
                     job.finished_at = time.time()
+                self._persist()
 
     def _run_job(self, job):
         writer = _JobLogWriter(job)
@@ -236,14 +387,20 @@ class JobManager:
         console.file = writer
         try:
             Path(job.output_dir).mkdir(parents=True, exist_ok=True)
-            items = self._build_items(job)
+
+            with self._meta_lock:
+                preset = self._preset_items.pop(job.id, None)
+            items = preset if preset is not None else self._build_items(job)
+
             with job.lock:
                 job.items = items
+            self._persist()
             if not items:
                 with job.lock:
                     job.status = "error"
                     job.error = job.error or "No se encontraron archivos para descargar"
                     job.finished_at = time.time()
+                self._persist()
                 return
 
             args = SimpleNamespace(no_proxy=(job.proxy_mode == "no-proxy"),
@@ -253,6 +410,7 @@ class JobManager:
             if any(_job_uses_proxy(it["provider"], args) for it in items):
                 with job.lock:
                     job.status = "fetching_proxies"
+                self._persist()
                 raw = fetch_proxy_list(PROXIES_URL)
                 if raw:
                     cache = ProxyCache(str(self.state_dir / "working_proxies.json"))
@@ -265,9 +423,10 @@ class JobManager:
 
             with job.lock:
                 job.status = "running"
+            self._persist()
 
             for item in items:
-                if job.status == "cancelled":
+                if job.cancel_event.is_set():
                     break
                 provider = item["provider"]
                 wants_proxy = _job_uses_proxy(provider, args)
@@ -275,12 +434,13 @@ class JobManager:
                 with job.lock:
                     item["status"] = "running"
                     item["mode"] = "proxy" if wants_proxy else "direct"
+                self._persist()
 
                 cb = self._make_progress_cb(job, item)
                 if use_proxy:
                     ok, code = download_file(provider, item["file_id"], proxy_pool,
                                               item["dest_dir"], job.speed, item["hint_name"],
-                                              progress_cb=cb)
+                                              progress_cb=cb, cancel_event=job.cancel_event)
                 elif wants_proxy:
                     # site/job wanted a proxy but none are available — don't
                     # silently fall back to the real IP.
@@ -289,22 +449,30 @@ class JobManager:
                         item["message"] = "No proxies available"
                 else:
                     ok, code = download_direct(provider, item["file_id"], item["dest_dir"],
-                                                item["hint_name"], progress_cb=cb)
+                                                item["hint_name"], progress_cb=cb,
+                                                cancel_event=job.cancel_event)
 
                 with job.lock:
-                    item["status"] = "done" if ok else "failed"
+                    if code == "cancelled":
+                        item["status"] = "cancelled"
+                    else:
+                        item["status"] = "done" if ok else "failed"
+                        # The last "downloading" progress report is throttled
+                        # to once/second, so the final bytes written after
+                        # that tick never get reflected — snap to 100%.
+                        if ok and item["total"]:
+                            item["bytes_done"] = item["total"]
                     item["code"] = code
-                    # The last "downloading" progress report is throttled to
-                    # once/second, so the final bytes written after that tick
-                    # never get reflected — snap the bar to 100% on success.
-                    if ok and item["total"]:
-                        item["bytes_done"] = item["total"]
+                self._persist()
 
             with job.lock:
-                if job.status != "cancelled":
+                if job.cancel_event.is_set():
+                    job.status = "cancelled"
+                else:
                     failed = sum(1 for it in job.items if it["status"] == "failed")
                     job.status = "done" if failed == 0 else "done_with_errors"
                 job.finished_at = time.time()
+            self._persist()
         finally:
             console.file = old_file
 

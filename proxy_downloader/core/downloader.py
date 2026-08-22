@@ -20,14 +20,27 @@ class DownloadError(Exception):
     pass
 
 
-def download_file(provider, file_id, proxy_pool, output_dir, min_speed_kb=MIN_SPEED_KB, hint_name=None, progress_cb=None):
+class Cancelled(Exception):
+    """Raised internally when `cancel_event` is set mid-download, to unwind
+    straight out of the retry loop without being treated as a transient
+    failure (which would penalize a perfectly good proxy and keep retrying)."""
+
+
+def download_file(provider, file_id, proxy_pool, output_dir, min_speed_kb=MIN_SPEED_KB, hint_name=None,
+                   progress_cb=None, cancel_event=None):
     """Download a file through the rotating proxy pool, with unlimited retries,
     resume support, and speed monitoring.
 
     `progress_cb`, if given, is called as progress_cb(status, **info) at key
-    points (status in "resolving"/"downloading"/"retry"/"done"/"failed") so a
-    non-terminal caller (e.g. the web UI) can track progress without parsing
-    the rich console output. Purely additive — the CLI never passes it."""
+    points (status in "resolving"/"downloading"/"retry"/"done"/"failed"/
+    "cancelled") so a non-terminal caller (e.g. the web UI) can track
+    progress without parsing the rich console output. Purely additive — the
+    CLI never passes it.
+
+    `cancel_event`, if given, is a threading.Event checked between attempts
+    and periodically while streaming — once set, the function stops (leaving
+    the .part file as-is for a later resume) and returns (False, "cancelled")
+    instead of retrying forever. Also purely additive."""
     def report(status, **info):
         if progress_cb:
             progress_cb(status, **info)
@@ -48,6 +61,9 @@ def download_file(provider, file_id, proxy_pool, output_dir, min_speed_kb=MIN_SP
         console.print(f"  [cyan]↻ Found .part — will resume from {resume_from/(1024*1024):.2f} MB[/cyan]")
 
     while True:
+        if cancel_event is not None and cancel_event.is_set():
+            report("cancelled", filename=fname)
+            return False, "cancelled"
         attempt += 1
         if tmp:
             resume_from = tmp.stat().st_size if tmp.exists() else 0
@@ -147,6 +163,8 @@ def download_file(provider, file_id, proxy_pool, output_dir, min_speed_kb=MIN_SP
                     write_mode = "ab" if resume_from > 0 else "wb"
                     with open(tmp, write_mode) as f:
                         for chunk in r.iter_content(chunk_size=262144):
+                            if cancel_event is not None and cancel_event.is_set():
+                                raise Cancelled()
                             if chunk:
                                 f.write(chunk)
                                 bytes_dl += len(chunk)
@@ -198,6 +216,10 @@ def download_file(provider, file_id, proxy_pool, output_dir, min_speed_kb=MIN_SP
             report("done", filename=fname, path=str(filepath))
             return True, None
 
+        except Cancelled:
+            console.print("  [yellow]⚠  Cancelled — progress saved to .part[/yellow]")
+            report("cancelled", filename=fname)
+            return False, "cancelled"
         except DownloadError as e:
             if "Speed" in str(e):
                 proxy_pool.mark_slow(proxy)
@@ -225,16 +247,19 @@ def download_file(provider, file_id, proxy_pool, output_dir, min_speed_kb=MIN_SP
         time.sleep(0.3)
 
 
-def download_direct(provider, file_id, output_dir, hint_name=None, progress_cb=None):
+def download_direct(provider, file_id, output_dir, hint_name=None, progress_cb=None, cancel_event=None):
     """Download without a proxy pool (--no-proxy mode), with resume and integrity check.
 
-    See `download_file` for what `progress_cb` receives — purely additive,
-    the CLI never passes it."""
+    See `download_file` for what `progress_cb`/`cancel_event` do — both
+    purely additive, the CLI never passes them."""
     def report(status, **info):
         if progress_cb:
             progress_cb(status, **info)
 
     try:
+        if cancel_event is not None and cancel_event.is_set():
+            report("cancelled", filename=hint_name)
+            return False, "cancelled"
         url = provider.download_url(file_id)
         if not url:
             console.print("  [red]✗ El sitio no devolvió un link de descarga[/red]")
@@ -296,6 +321,8 @@ def download_direct(provider, file_id, output_dir, hint_name=None, progress_cb=N
                 write_mode = "ab" if resume_from > 0 else "wb"
                 with open(tmp, write_mode) as f:
                     for chunk in r.iter_content(chunk_size=262144):
+                        if cancel_event is not None and cancel_event.is_set():
+                            raise Cancelled()
                         if chunk:
                             f.write(chunk)
                             bar.advance(task, len(chunk))
@@ -337,6 +364,10 @@ def download_direct(provider, file_id, output_dir, hint_name=None, progress_cb=N
         console.print(f"  [green]✓ Saved: {fpath}[/green]")
         report("done", filename=fname, path=str(fpath))
         return True, None
+    except Cancelled:
+        console.print("  [yellow]⚠  Cancelled — progress saved to .part[/yellow]")
+        report("cancelled", filename=hint_name)
+        return False, "cancelled"
     except FileUnavailable as e:
         console.print(f"  [red]✗ File unavailable: {e}[/red]")
         report("failed", message=str(e))

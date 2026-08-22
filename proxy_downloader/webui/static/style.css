@@ -157,6 +157,7 @@ textarea { resize: vertical; font-family: ui-monospace, monospace; font-size: 0.
 
 .badge.queued { background: #2a2f3d; color: var(--dim); }
 .badge.resolving, .badge.fetching_proxies, .badge.running { background: #2a3450; color: var(--accent); }
+.badge.cancelling { background: #3a2e14; color: var(--yellow); }
 .badge.done { background: #123326; color: var(--green); }
 .badge.done_with_errors { background: #3a2e14; color: var(--yellow); }
 .badge.error, .badge.failed { background: #3a1a1a; color: var(--red); }

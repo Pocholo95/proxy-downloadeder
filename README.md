@@ -158,6 +158,17 @@ seguís el progreso de cada archivo desde el navegador. Corre siempre un
 trabajo a la vez, en el mismo orden en que se encolan — igual que ir
 corriendo la CLI repetidas veces.
 
+El historial de trabajos (con su log) se persiste en `state/jobs.json`, así
+que sobrevive redeploys/restarts del contenedor — cualquier trabajo que haya
+quedado a mitad de camino cuando el proceso se cortó se marca como
+"interrumpido" al reiniciar, sin re-lanzarlo solo. Desde cada trabajo podés:
+**cancelar** uno que está corriendo (deja el `.part` en disco, listo para
+resumir), **reintentar** solo los archivos que fallaron/se cancelaron (arranca
+desde donde quedó el `.part`, no de cero), y **borrarlo** del historial una
+vez terminado — o **"limpiar completados"** para vaciar todo lo terminado de
+una. El historial también se poda solo, guardando como mucho los últimos 300
+trabajos.
+
 ```bash
 docker network create proxy   # una vez, salvo que ya tengas una red externa "proxy" (p. ej. la que usa tu Traefik)
 docker compose up -d --build
@@ -228,9 +239,12 @@ viviendo en `config/` (relativo al directorio desde donde corrés el
 proceso), igual que en la CLI.
 
 La API REST que usa el frontend (`GET/POST /api/jobs`, `GET /api/jobs/<id>`,
-`GET /api/jobs/<id>/log`, `POST /api/jobs/<id>/cancel`, `GET /api/sites`,
-`POST /api/sites/<nombre>/proxy`) es la misma que consume la página — se
-puede scriptear igual.
+`GET /api/jobs/<id>/log`, `POST /api/jobs/<id>/cancel`,
+`POST /api/jobs/<id>/retry`, `DELETE /api/jobs/<id>`,
+`POST /api/jobs/clear-finished`, `GET /api/sites`,
+`POST /api/sites/<nombre>/proxy`, `GET/DELETE /api/files`,
+`GET /api/files/download`) es la misma que consume la página — se puede
+scriptear igual.
 
 ## Agregar un sitio nuevo
 
