@@ -23,6 +23,7 @@ proxy_downloader/
     fichier.py                   sitio con countdown server-side + cookies de sesión (caso avanzado)
     gofile.py                     sitio con cuenta guest + token anti-scraping (caso avanzado)
     fileditch.py                   sitio con proof-of-work + link firmado ofuscado en JS (caso avanzado)
+    bunkr.py                        sitio con álbumes paginados + resolución de link en 2 pasos (caso avanzado)
   webui/                      Flask + job manager en background — ver Web UI / Docker más abajo
 webui.py                    punto de entrada del servidor web (interfaz)
 ```
@@ -42,6 +43,8 @@ python downloader.py -f https://1fichier.com/?XXXXXXXXX
 python downloader.py -f https://gofile.io/d/XXXXXXX      # archivo suelto
 python downloader.py -F https://gofile.io/d/XXXXXXX      # o carpeta — mismo link, se detecta solo
 python downloader.py -f https://fileditchfiles.st/XXXXXXX/XXXXXXX/nombre.ext
+python downloader.py -f https://bunkr.si/f/XXXXXXX        # archivo suelto (o /i/, /v/)
+python downloader.py -F https://bunkr.si/a/XXXXXXX        # álbum — cualquier dominio bunkr.*, no solo .si
 python downloader.py -F https://pixeldrain.com/l/XXXXXXX
 python downloader.py -b lista.txt          # batch, puede mezclar sitios distintos
 python downloader.py --list-sites          # ver sitios y si usan proxy por defecto
@@ -101,6 +104,12 @@ individuales se van marcando `# [OK]` / `# [FAILED]` como siempre.
 >   que se pueda resolver con cómputo local como el proof-of-work de
 >   FileDitch — no es confiable de automatizar con `requests` y probablemente
 >   empeora con proxies gratis (mala reputación de IP).
+> - Bunkr cambia/agrega dominios espejo seguido (bunkr.si, .sk, .ph, .cr...)
+>   para esquivar bloqueos, así que la detección no usa una lista fija de
+>   dominios — acepta cualquier host cuyo nombre sea literalmente "bunkr"
+>   (cualquier TLD). El link real de descarga sale en dos pasos (CDN +
+>   firma con token que expira), resueltos de cero en cada intento, igual
+>   que Mediafire/FileDitch.
 
 El sitio se detecta automáticamente por el dominio de la URL (o, si es un ID
 suelto, se usa el sitio marcado como default). No hace falta pasar `--site`.
@@ -109,13 +118,13 @@ suelto, se usa el sitio marcado como default). No hace falta pasar `--site`.
 
 Cada sitio trae un default (`use_proxy_by_default` en su clase). Pixeldrain,
 Mega y Gofile lo usan por defecto (banean/limitan agresivo por IP en su tier
-gratis/guest); Mediafire, 1fichier y FileDitch no — Mediafire y FileDitch
-porque sus links de CDN no están rate-limited de esa forma (el
-proof-of-work de FileDitch frena scraping masivo, no una descarga puntual),
-1fichier porque activamente bloquea IPs de datacenter/proxy (justo lo que
-son los proxies gratis de esta lista). En un batch mixto, cada archivo usa
-el modo de su propio sitio automáticamente — vas a ver `(proxy)` o
-`(direct)` en la salida por cada uno.
+gratis/guest); Mediafire, FileDitch y Bunkr no — sus links de CDN no están
+rate-limited de esa forma (el proof-of-work de FileDitch frena scraping
+masivo, no una descarga puntual); 1fichier tampoco, pero por otra razón:
+activamente bloquea IPs de datacenter/proxy (justo lo que son los proxies
+gratis de esta lista). En un batch mixto, cada archivo usa el modo de su
+propio sitio automáticamente — vas a ver `(proxy)` o `(direct)` en la
+salida por cada uno.
 
 **Velocidad mínima** (`--speed`, default 1500 KB/s): solo aplica cuando la
 descarga va **con proxy** — si un proxy cae por debajo de eso, se
@@ -319,7 +328,7 @@ Con eso alcanza: la rotación de proxies, el resume, el chequeo de velocidad,
 el modo batch y el modo carpeta ya funcionan solos para el sitio nuevo — todo
 eso vive en `core/downloader.py` y no depende de ningún sitio en particular.
 
-Seis ejemplos reales para copiar según tu caso:
+Siete ejemplos reales para copiar según tu caso:
 - `proxy_downloader/sites/pixeldrain.py` — sitio simple, URL de descarga fija,
   proxy activado por defecto.
 - `proxy_downloader/sites/mediafire.py` — sitio que necesita scrapear la
@@ -350,3 +359,9 @@ Seis ejemplos reales para copiar según tu caso:
   expiración) ofuscado en un array de JS que hay que reconstruir con regex
   en vez de un simple scrape de HTML — el ejemplo de "el link no está en un
   atributo, hay que parsear código".
+- `proxy_downloader/sites/bunkr.py` — sitio que sobreescribe `owns()` en vez
+  de listar dominios fijos (para aceptar cualquier mirror `bunkr.<tld>` sin
+  mantenerla actualizada), pagina álbumes largos, y resuelve el link real en
+  dos pasos encadenados (CDN → firma con token). También el ejemplo de por
+  qué `folder_id` no puede ser una URL cruda: se usa como nombre de
+  subcarpeta, así que tiene que ser algo sin `/` (acá, `"dominio:id"`).
