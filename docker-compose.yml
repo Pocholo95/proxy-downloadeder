@@ -22,6 +22,7 @@ services:
       - "traefik.http.routers.proxy-downloader.rule=Host(`${TRAEFIK_HOST:-downloader.localhost}`)"
       - "traefik.http.routers.proxy-downloader.entrypoints=${TRAEFIK_ENTRYPOINTS:-websecure}"
       - "traefik.http.routers.proxy-downloader.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}"
+      - "traefik.http.routers.proxy-downloader.service=proxy-downloader"
       - "traefik.http.services.proxy-downloader.loadbalancer.server.port=8080"
       # This app has no login — anyone who can reach it can start
       # downloads, and browse/delete anything under /downloads. Uncomment
@@ -34,10 +35,10 @@ services:
       # (supervisord), own port/subdomain. No auth either, and its API can
       # run arbitrary ffmpeg args — same trust boundary as this app, so the
       # same "restrict to your LAN/VPN" note above applies here too.
-      - "traefik.enable=${TRAEFIK_ENABLE:-false}"
       - "traefik.http.routers.vidgrid.rule=Host(`${TRAEFIK_VIDGRID_HOST:-vidgrid.localhost}`)"
       - "traefik.http.routers.vidgrid.entrypoints=${TRAEFIK_ENTRYPOINTS:-websecure}"
       - "traefik.http.routers.vidgrid.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}"
+      - "traefik.http.routers.vidgrid.service=vidgrid"
       - "traefik.http.services.vidgrid.loadbalancer.server.port=8090"
     restart: unless-stopped
 
