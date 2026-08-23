@@ -192,6 +192,11 @@ para probar y el archivo queda marcado como fallido con un mensaje claro.
 
 ## Web UI / Docker
 
+La paleta/tipografía/tarjetas de la UI están tomadas del tema "classic"
+(navy + sky-blue) de VidGrid, otro proyecto local — mismos tokens oklch,
+mismo radio/sombras, traducidos a CSS plano en `static/style.css` ya que
+esta UI no tiene build step (HTML+JS vanilla, sin React/Tailwind).
+
 Interfaz web sobre el mismo motor de descarga: pegás una URL (o una carpeta,
 o un batch de varias líneas), elegís carpeta de salida y modo de proxy, y
 seguís el progreso de cada archivo desde el navegador. Corre siempre un
