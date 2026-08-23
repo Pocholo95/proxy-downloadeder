@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 
 from .events import push_log, push_progress
 from .media_server import upload_dir
@@ -41,14 +42,35 @@ class TaskSession:
         self.input_path: str | None = None
         self._proc: subprocess.Popen | None = None
         self._lock = threading.Lock()
+        self.last_active = time.time()
+
+    def touch(self) -> None:
+        """Marks this session as recently used -- called on every API
+        interaction so the idle sweep (see api.py's sweep_idle_sessions)
+        can tell a session nobody's touched in a while (its browser tab
+        was closed, its task removed client-side, whatever) apart from
+        one still being actively worked with."""
+        self.last_active = time.time()
+
+    def is_idle(self, timeout_seconds: float) -> bool:
+        # Never idle out a session with a live ffmpeg process, no matter
+        # how long a single encode runs -- exec() below already calls
+        # touch() on every progress tick, but this is a second, cheaper
+        # guard against killing a real in-progress job.
+        with self._lock:
+            if self._proc is not None:
+                return False
+        return (time.time() - self.last_active) > timeout_seconds
 
     def bind_input(self, path: str) -> None:
+        self.touch()
         self.input_path = path
 
     def _path(self, filename: str) -> str:
         return os.path.join(self.dir, filename)
 
     def exec(self, args: list[str], duration_hint: float | None = None) -> None:
+        self.touch()
         resolved = [
             self.input_path if (a == "input.mp4" and self.input_path) else a
             for a in args
@@ -91,6 +113,7 @@ class TaskSession:
         try:
             assert proc.stdout is not None
             for line in proc.stdout:
+                self.touch()  # long single encodes shouldn't idle out mid-run
                 # ffmpeg's "-progress" out_time_ms field is actually
                 # microseconds despite the name (long-standing ffmpeg quirk).
                 m = re.match(r"out_time_ms=(\d+)", line.strip())
@@ -121,20 +144,24 @@ class TaskSession:
                 pass
 
     def write_file(self, filename: str, data: bytes) -> None:
+        self.touch()
         with open(self._path(filename), "wb") as f:
             f.write(data)
 
     def read_file(self, filename: str) -> bytes:
+        self.touch()
         with open(self._path(filename), "rb") as f:
             return f.read()
 
     def list_dir(self, subpath: str = "") -> list[str]:
+        self.touch()
         target = self._path(subpath) if subpath else self.dir
         if not os.path.isdir(target):
             return []
         return os.listdir(target)
 
     def delete_file(self, filename: str) -> None:
+        self.touch()
         path = self._path(filename)
         if os.path.isfile(path):
             try:

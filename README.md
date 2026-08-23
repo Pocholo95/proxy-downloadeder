@@ -427,16 +427,37 @@ todos de una (una carpeta compartida puede tener muchísimos videos
 acumulados; nada se agrega hasta que elijas explícitamente cuáles).
 
 También podés **subir un archivo desde tu dispositivo** para procesarlo
-sin que quede permanentemente en `/downloads` — botones "Add videos…"/
-"Add folder…" o arrastrar y soltar, igual que en el uso desktop normal.
-Esos archivos suben a una carpeta temporal del contenedor y **se borran
-solos** cuando terminás con esa tarea (la borrás de la lista, o resetea/
-reintenta) — no antes tenían limpieza automática (quedaban hasta que el
-contenedor se reiniciaba), lo arreglamos para que sea un uso realmente
-temporal: `TaskSession.cleanup()` en `desktop/ffmpeg_runner.py` borra el
-archivo subido solo si vive dentro del directorio de subidas del propio
-backend, nunca si es un archivo escaneado por path (esos son tuyos,
-nunca se tocan).
+sin que quede permanentemente en `/downloads` — botón "Add videos…" o
+arrastrar y soltar, igual que en el uso desktop normal (soporta elegir
+varios de una, no hace falta el picker de carpeta nativo para eso). Esos
+archivos suben a una carpeta temporal del contenedor y **se borran solos**
+cuando terminás con esa tarea (la borrás de la lista, o resetea/reintenta)
+— no antes tenían limpieza automática (quedaban hasta que el contenedor
+se reiniciaba), lo arreglamos para que sea un uso realmente temporal:
+`TaskSession.cleanup()` en `desktop/ffmpeg_runner.py` borra el archivo
+subido solo si vive dentro del directorio de subidas del propio backend,
+nunca si es un archivo escaneado por path (esos son tuyos, nunca se
+tocan).
+
+### Limpieza automática por inactividad
+
+Corriendo 24/7, dos cosas se acumulan si nunca se limpian solas: cada
+tarea (`TaskSession`, en `desktop/ffmpeg_runner.py`) crea una carpeta
+temporal y una entrada en memoria que solo se liberaban si vos
+explícitamente resetéabas/borrabas esa tarea — cerrar la pestaña sin
+hacerlo las dejaba ahí para siempre; y cada archivo que previsualizás o
+reproducís queda registrado en memoria (`/media/<token>` → path) sin
+límite, tampoco.
+
+Ahora un hilo en segundo plano barre cada `VIDGRID_SWEEP_INTERVAL_MINUTES`
+(default 10) y limpia lo que no tuvo actividad en
+`VIDGRID_IDLE_MINUTES` (default 60): tareas sin ninguna interacción (ni
+un solo request de ffmpeg/lectura/escritura) en ese lapso, y tokens de
+`/media/` sin ningún fetch. Nunca toca una tarea con un `ffmpeg` corriendo
+en ese momento, sin importar cuánto tarde ese proceso — y una tarea con
+un encode largo se sigue considerando "activa" mientras produce líneas
+de progreso, así que un solo video grande no se corta a mitad de camino.
+Poné `VIDGRID_IDLE_MINUTES=0` para desactivarlo del todo.
 
 Mismo modelo de confianza que el resto de esta app: **sin autenticación**.
 Su API (`/api/tasks/exec` en particular) corre `ffmpeg` con los argumentos

@@ -44,13 +44,16 @@ COPY supervisord.conf /etc/supervisor/conf.d/apps.conf
 RUN mkdir -p /downloads /app/config /app/state
 VOLUME ["/downloads", "/app/config", "/app/state"]
 
-ENV DOWNLOAD_DIR=/downloads \
+ENV PYTHONUNBUFFERED=1 \
+    DOWNLOAD_DIR=/downloads \
     STATE_DIR=/app/state \
     PORT=8080 \
     VIDGRID_HOST=0.0.0.0 \
     VIDGRID_PORT=8090 \
     VIDGRID_NO_BROWSER=1 \
-    VIDGRID_SHARED_DIR=/downloads
+    VIDGRID_SHARED_DIR=/downloads \
+    VIDGRID_IDLE_MINUTES=60 \
+    VIDGRID_SWEEP_INTERVAL_MINUTES=10
 
 EXPOSE 8080 8090
 

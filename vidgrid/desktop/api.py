@@ -117,3 +117,19 @@ class Api:
             session = self._sessions.pop(task_id, None)
         if session is not None:
             session.cleanup()
+
+    # --- Idle cleanup (see desktop/idle_sweeper.py) ---
+
+    def sweep_idle_sessions(self, timeout_seconds: float) -> int:
+        """Cleans up (temp dir + in-memory entry) any task session nobody's
+        touched in timeout_seconds -- e.g. the browser tab was closed, or
+        the task was removed client-side, without ever calling reset_task
+        (the frontend's normal cleanup path). Without this, a long-running
+        server accumulates one abandoned temp directory + dict entry per
+        such session forever. Returns how many were cleaned, for logging."""
+        with self._lock:
+            idle_ids = [tid for tid, s in self._sessions.items() if s.is_idle(timeout_seconds)]
+            sessions = [self._sessions.pop(tid) for tid in idle_ids]
+        for session in sessions:
+            session.cleanup()
+        return len(sessions)

@@ -29,6 +29,7 @@ import secrets
 import shutil
 import tempfile
 import threading
+import time
 import urllib.parse
 from pathlib import Path
 from typing import Any, Callable
@@ -37,6 +38,7 @@ from .events import subscribe as _subscribe_events
 from .events import unsubscribe as _unsubscribe_events
 
 _MEDIA_REGISTRY: dict[str, str] = {}
+_MEDIA_LAST_ACCESS: dict[str, float] = {}
 _DIST_DIR = ""
 _API: Any = None
 _UPLOAD_DIR = ""
@@ -87,11 +89,28 @@ def register_media(path: str) -> str:
     """Register a real file path for serving; returns its /media/<token> path segment."""
     token = secrets.token_urlsafe(16)
     _MEDIA_REGISTRY[token] = path
+    _MEDIA_LAST_ACCESS[token] = time.time()
     return token
 
 
 def unregister_media(token: str) -> None:
     _MEDIA_REGISTRY.pop(token, None)
+    _MEDIA_LAST_ACCESS.pop(token, None)
+
+
+def prune_media_registry(timeout_seconds: float) -> int:
+    """Drops any /media/<token> registration nobody's fetched (registration
+    counts as a fetch too) in timeout_seconds -- these are cheap (a dict
+    entry pointing at a path, not a copy of the file), but on a long-running
+    server they'd otherwise accumulate one per video ever previewed/played,
+    forever. Never touches _UPLOAD_DIR files directly; TaskSession cleanup
+    (api.py's sweep_idle_sessions) owns deleting those, this only forgets
+    the /media/ token that pointed at one. Returns how many were dropped."""
+    now = time.time()
+    stale = [t for t, last in _MEDIA_LAST_ACCESS.items() if now - last > timeout_seconds]
+    for token in stale:
+        unregister_media(token)
+    return len(stale)
 
 
 def upload_dir() -> str:
@@ -245,6 +264,7 @@ class MediaHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         if path is None or not os.path.isfile(path):
             self.send_error(404, "Unknown or missing media token")
             return
+        _MEDIA_LAST_ACCESS[token] = time.time()
 
         size = os.path.getsize(path)
         range_header = self.headers.get("Range")
