@@ -1,7 +1,6 @@
 import * as React from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { FolderInput, FolderOpen, Upload } from "lucide-react";
+import { FolderOpen, Upload } from "lucide-react";
 import { Field, FieldLabel } from "@/components/ui/field";
 import type { VideoSource } from "@/types";
 import { errlog } from "@/utils";
@@ -53,24 +52,29 @@ function scannedToVideoSource(f: ScannedFile): VideoSource {
 }
 
 /**
- * File Picker with three ways to add videos:
- * - Browser <input type=file> dialogs (single/multi file, or a whole
- *   folder via webkitdirectory), or drag & drop -- these upload the picked
- *   files' bytes to the local backend (uploadInput), since browsers don't
- *   expose real filesystem paths.
- * - A typed path (file or folder) -- scanned in place by the backend with
- *   no upload at all (scanPath), since the app and the files are on the
- *   same machine. Much faster for large batches/whole folders.
+ * File Picker with two ways to add videos:
+ * - The browser's own <input type=file multiple> dialog, or drag & drop --
+ *   these upload the picked files' bytes to the local backend
+ *   (uploadInput), since browsers don't expose real filesystem paths.
+ *   Multi-select is native to the dialog, so this covers batches too.
+ * - The shared-folder shortcut (sharedDir/scanPath below), when the
+ *   backend is configured with VIDGRID_SHARED_DIR -- scanned in place by
+ *   the backend with no upload at all, since the app and that folder are
+ *   on the same machine (e.g. another app's shared downloads volume in a
+ *   combined deploy).
+ *
+ * Used to also have a native folder-picker button and a free-text
+ * scan-path field for typing an arbitrary path; dropped both since they
+ * were rarely used and Add videos… already covers multi-file selection.
+ * handleScanPath still exists to back the sharedDir shortcut below.
  */
 export default function FilePicker({ onSourcesChange }: Props) {
   const [successAnim, setSuccessAnim] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [dragActive, setDragActive] = React.useState(false);
-  const [pathInput, setPathInput] = React.useState("");
   const [pathError, setPathError] = React.useState<string | null>(null);
   const [sharedDir, setSharedDir] = React.useState("");
   const fileInputRef = React.useRef<HTMLInputElement>(null);
-  const folderInputRef = React.useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
     nativeApi
@@ -108,12 +112,6 @@ export default function FilePicker({ onSourcesChange }: Props) {
     void ingestFiles(files);
   };
 
-  const handleFolderSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? []).filter(isVideoFile);
-    e.target.value = "";
-    void ingestFiles(files);
-  };
-
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setDragActive(false);
@@ -121,9 +119,8 @@ export default function FilePicker({ onSourcesChange }: Props) {
     void ingestFiles(files);
   };
 
-  const handleScanPath = async (overridePath?: string) => {
-    const path = (overridePath ?? pathInput).trim();
-    if (!path) return;
+  const handleScanPath = async (path: string) => {
+    if (!path.trim()) return;
     setBusy(true);
     setPathError(null);
     try {
@@ -132,7 +129,6 @@ export default function FilePicker({ onSourcesChange }: Props) {
         setPathError("No video files found at that path.");
       } else {
         onSourcesChange(found.map(scannedToVideoSource));
-        setPathInput("");
         flashSuccess();
       }
     } catch (e) {
@@ -145,7 +141,7 @@ export default function FilePicker({ onSourcesChange }: Props) {
 
   return (
     <Field className="h-full flex flex-col">
-      <FieldLabel>Add video files or a whole folder</FieldLabel>
+      <FieldLabel>Add video files</FieldLabel>
       <div
         onDragOver={(e) => {
           e.preventDefault();
@@ -172,15 +168,6 @@ export default function FilePicker({ onSourcesChange }: Props) {
           className="hidden"
           onChange={handleFilesSelected}
         />
-        <input
-          ref={folderInputRef}
-          type="file"
-          multiple
-          // @ts-expect-error -- non-standard attribute, no React DOM typing for it
-          webkitdirectory=""
-          className="hidden"
-          onChange={handleFolderSelected}
-        />
         <Button
           type="button"
           variant="ghost"
@@ -191,47 +178,8 @@ export default function FilePicker({ onSourcesChange }: Props) {
           <Upload className="h-4 w-4 shrink-0" />
           <span className="text-sm font-medium">Add videos…</span>
         </Button>
-        <Button
-          type="button"
-          variant="outline"
-          className="w-full justify-center gap-2"
-          onClick={() => folderInputRef.current?.click()}
-          disabled={busy}
-        >
-          <FolderOpen className="h-4 w-4 shrink-0" />
-          <span className="text-sm font-medium">Add folder…</span>
-        </Button>
       </div>
       <div className="mt-2 flex flex-col gap-1">
-        <div className="flex gap-2">
-          <Input
-            type="text"
-            placeholder="…or paste a file/folder path (no upload, scanned in place)"
-            value={pathInput}
-            onChange={(e) => {
-              setPathInput(e.target.value);
-              setPathError(null);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                void handleScanPath();
-              }
-            }}
-            disabled={busy}
-            className="text-sm"
-          />
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={() => void handleScanPath()}
-            disabled={busy || !pathInput.trim()}
-          >
-            <FolderInput className="h-4 w-4" />
-            Add
-          </Button>
-        </div>
         {sharedDir && (
           <Button
             type="button"
