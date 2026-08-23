@@ -68,8 +68,16 @@ export default function FilePicker({ onSourcesChange }: Props) {
   const [dragActive, setDragActive] = React.useState(false);
   const [pathInput, setPathInput] = React.useState("");
   const [pathError, setPathError] = React.useState<string | null>(null);
+  const [sharedDir, setSharedDir] = React.useState("");
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const folderInputRef = React.useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => {
+    nativeApi
+      .getSharedDir()
+      .then(setSharedDir)
+      .catch(() => setSharedDir(""));
+  }, []);
 
   const flashSuccess = () => {
     setSuccessAnim(true);
@@ -113,8 +121,8 @@ export default function FilePicker({ onSourcesChange }: Props) {
     void ingestFiles(files);
   };
 
-  const handleScanPath = async () => {
-    const path = pathInput.trim();
+  const handleScanPath = async (overridePath?: string) => {
+    const path = (overridePath ?? pathInput).trim();
     if (!path) return;
     setBusy(true);
     setPathError(null);
@@ -224,6 +232,19 @@ export default function FilePicker({ onSourcesChange }: Props) {
             Add
           </Button>
         </div>
+        {sharedDir && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="w-full justify-center gap-2"
+            onClick={() => void handleScanPath(sharedDir)}
+            disabled={busy}
+          >
+            <FolderOpen className="h-4 w-4 shrink-0" />
+            <span className="text-sm font-medium">Browse {sharedDir}</span>
+          </Button>
+        )}
         {pathError && <p className="text-xs text-destructive">{pathError}</p>}
       </div>
     </Field>

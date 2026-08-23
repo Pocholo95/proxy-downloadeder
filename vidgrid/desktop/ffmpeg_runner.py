@@ -17,6 +17,7 @@ import tempfile
 import threading
 
 from .events import push_log, push_progress
+from .media_server import upload_dir
 from .paths import ffmpeg_exe
 
 # Windows-only: suppress the console window that would otherwise flash per
@@ -144,3 +145,19 @@ class TaskSession:
     def cleanup(self) -> None:
         self.abort()
         shutil.rmtree(self.dir, ignore_errors=True)
+        # A browser-uploaded source file lives in the shared upload dir and
+        # is ours to delete once this task is done with it -- unlike a
+        # scan_path()'d file, which lives wherever the user's own
+        # filesystem has it (e.g. the shared /downloads volume) and must
+        # never be touched here.
+        udir = upload_dir()
+        if self.input_path and udir:
+            try:
+                is_uploaded = os.path.commonpath([self.input_path, udir]) == udir
+            except ValueError:
+                is_uploaded = False  # different drives (Windows) -- can't be inside udir
+            if is_uploaded:
+                try:
+                    os.remove(self.input_path)
+                except OSError:
+                    pass

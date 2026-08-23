@@ -44,6 +44,12 @@ export const nativeApi = {
   getCpuCount: () =>
     call<{ count: number }>("/api/cpu_count", "GET").then((r) => r.count),
 
+  /** A folder the backend suggests as a one-click scan_path shortcut (e.g.
+   *  another app's shared downloads volume in a combined deploy) -- empty
+   *  string if none is configured (VIDGRID_SHARED_DIR unset). */
+  getSharedDir: () =>
+    call<{ path: string }>("/api/shared_dir", "GET").then((r) => r.path),
+
   /**
    * Scans a filesystem path (a single file, or a folder recursively) on
    * the machine the backend is running on -- no upload, since the app and

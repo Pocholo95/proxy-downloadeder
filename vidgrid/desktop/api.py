@@ -33,6 +33,12 @@ class Api:
     def get_cpu_count(self) -> int:
         return get_worker_count()
 
+    def shared_dir(self) -> str:
+        """A folder the frontend can offer as a one-click scan_path shortcut
+        (e.g. another app's shared downloads volume in a combined deploy) --
+        empty by default, so a plain desktop install shows nothing extra."""
+        return os.environ.get("VIDGRID_SHARED_DIR", "")
+
     # --- File/folder input by typed path (no browser upload -- the app and
     # the files are on the same machine, so this just reads them directly) ---
 

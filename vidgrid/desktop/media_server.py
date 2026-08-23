@@ -46,6 +46,7 @@ _RouteFn = Callable[[Any, dict], Any]
 _ROUTES: dict[tuple[str, str], _RouteFn] = {
     ("GET", "/api/check_ffmpeg"): lambda api, body: api.check_ffmpeg(),
     ("GET", "/api/cpu_count"): lambda api, body: {"count": api.get_cpu_count()},
+    ("GET", "/api/shared_dir"): lambda api, body: {"path": api.shared_dir()},
     ("POST", "/api/scan_path"): lambda api, body: api.scan_path(body["path"]),
     ("POST", "/api/probe_metadata"): lambda api, body: api.probe_metadata(body["path"]),
     ("POST", "/api/register_media"): lambda api, body: api.register_media(body["path"]),
@@ -91,6 +92,17 @@ def register_media(path: str) -> str:
 
 def unregister_media(token: str) -> None:
     _MEDIA_REGISTRY.pop(token, None)
+
+
+def upload_dir() -> str:
+    """Directory browser-uploaded input files land in (see _handle_upload
+    below) -- a function rather than exporting _UPLOAD_DIR directly since
+    it's only set once MediaServer.__init__ runs, not at import time.
+    Used by ffmpeg_runner.TaskSession.cleanup() to tell an uploaded file
+    (safe/expected to delete once its task is done) apart from a
+    scan_path()'d file living wherever the user's own filesystem has it
+    (never ours to delete)."""
+    return _UPLOAD_DIR
 
 
 def _parse_range(range_header: str, size: int) -> tuple[int, int]:
