@@ -309,6 +309,15 @@ def api_create_upload_job():
     return jsonify(job.to_dict()), 201
 
 
+@app.post("/api/uploads/jobs/<job_id>/retry")
+def api_retry_upload_job(job_id):
+    try:
+        job = upload_manager.retry_job(job_id)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify(job.to_dict()), 201
+
+
 @app.delete("/api/uploads/jobs/<job_id>")
 def api_delete_upload_job(job_id):
     try:

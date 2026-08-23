@@ -26,10 +26,12 @@ class UploadJob:
         self.source_name = source_name
         self.dest_folder_id = dest_folder_id
         self.dest_folder_name = dest_folder_name
-        self.is_temp_source = is_temp_source  # delete source_path once finished
+        self.is_temp_source = is_temp_source  # delete source_path once finished successfully
         self.status = "queued"  # queued|uploading|done|error
         self.error = None
         self.url = None
+        self.bytes_sent = 0
+        self.total_bytes = 0
         self.created_at = time.time()
         self.started_at = None
         self.finished_at = None
@@ -40,11 +42,16 @@ class UploadJob:
             return {
                 "id": self.id,
                 "site": self.site,
+                "source_path": self.source_path,
                 "source_name": self.source_name,
+                "dest_folder_id": self.dest_folder_id,
                 "dest_folder_name": self.dest_folder_name,
+                "is_temp_source": self.is_temp_source,
                 "status": self.status,
                 "error": self.error,
                 "url": self.url,
+                "bytes_sent": self.bytes_sent,
+                "total_bytes": self.total_bytes,
                 "created_at": self.created_at,
                 "started_at": self.started_at,
                 "finished_at": self.finished_at,
@@ -53,10 +60,12 @@ class UploadJob:
     @classmethod
     def from_dict(cls, d):
         job = cls(d["id"], d["site"], d.get("source_path"), d["source_name"],
-                   d.get("dest_folder_id"), d.get("dest_folder_name"), False)
+                   d.get("dest_folder_id"), d.get("dest_folder_name"), d.get("is_temp_source", False))
         job.status = d.get("status", "error")
         job.error = d.get("error")
         job.url = d.get("url")
+        job.bytes_sent = d.get("bytes_sent", 0)
+        job.total_bytes = d.get("total_bytes", 0)
         job.created_at = d.get("created_at") or time.time()
         job.started_at = d.get("started_at")
         job.finished_at = d.get("finished_at")
@@ -212,6 +221,7 @@ class UploadManager:
                 raise ValueError("Esperá a que termine antes de borrarlo")
             del self.jobs[job_id]
             self.order.remove(job_id)
+        self._cleanup_source(job)
         self._persist()
         return True
 
@@ -219,11 +229,40 @@ class UploadManager:
         with self._meta_lock:
             to_remove = [jid for jid in self.order
                          if jid in self.jobs and self.jobs[jid].status in TERMINAL_STATUSES]
+            removed_jobs = [self.jobs[jid] for jid in to_remove]
             for jid in to_remove:
                 del self.jobs[jid]
             self.order = [jid for jid in self.order if jid not in to_remove]
+        for job in removed_jobs:
+            self._cleanup_source(job)
         self._persist()
         return len(to_remove)
+
+    def retry_job(self, job_id):
+        """Re-submits a failed upload as a new job with the same
+        site/source/destination. Ownership of a temp (device-uploaded)
+        source file moves to the new job — the old failed entry is marked
+        as no longer owning it, so deleting either the old or the new job
+        from history can never race against the other still reading/
+        writing the same file."""
+        src = self.jobs.get(job_id)
+        if not src:
+            raise ValueError("Job not found")
+        with src.lock:
+            if src.status != "error":
+                raise ValueError("Solo se puede reintentar un trabajo que falló")
+            source_path = src.source_path
+            is_temp_source = src.is_temp_source
+        if not source_path or not Path(source_path).exists():
+            raise ValueError("El archivo original ya no está disponible — subilo de nuevo")
+
+        job = self.create_job(src.site, source_path, src.source_name,
+                               dest_folder_id=src.dest_folder_id, dest_folder_name=src.dest_folder_name,
+                               is_temp_source=is_temp_source)
+        with src.lock:
+            src.is_temp_source = False
+        self._persist()
+        return job
 
     # ── worker ──
     def _worker_loop(self):
@@ -241,11 +280,33 @@ class UploadManager:
             finally:
                 with job.lock:
                     job.finished_at = job.finished_at or time.time()
+                    succeeded = job.status == "done"
                 self._persist()
-                self._cleanup_source(job)
+                # A failed upload keeps its temp (device-uploaded) source
+                # file around so "Reintentar" has something to resubmit —
+                # it only gets cleaned up once the job succeeds, or once
+                # its history entry is deleted/cleared.
+                if succeeded:
+                    self._cleanup_source(job)
 
     def _run_job(self, job):
         info = upload_sites.SITES[job.site]
+        try:
+            job.total_bytes = Path(job.source_path).stat().st_size
+        except OSError:
+            pass
+
+        last_persist = [0.0]
+
+        def progress_cb(sent, total):
+            with job.lock:
+                job.bytes_sent = sent
+                job.total_bytes = total
+            now = time.time()
+            if now - last_persist[0] > 1:
+                last_persist[0] = now
+                self._persist()
+
         try:
             token = None
             if info["needs_account"] or info.get("account_optional"):
@@ -254,7 +315,7 @@ class UploadManager:
                     raise upload_sites.UploadError("La cuenta de este sitio ya no está configurada")
                 if creds:
                     token = creds["token"]
-            url = info["upload"](token, job.source_path, job.dest_folder_id)
+            url = info["upload"](token, job.source_path, job.dest_folder_id, progress_cb=progress_cb)
         except upload_sites.UploadError as e:
             with job.lock:
                 job.status = "error"
@@ -274,6 +335,8 @@ class UploadManager:
         with job.lock:
             job.status = "done"
             job.url = url
+            if job.total_bytes:
+                job.bytes_sent = job.total_bytes
 
     def _cleanup_source(self, job):
         if not job.is_temp_source:

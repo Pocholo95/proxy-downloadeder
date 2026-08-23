@@ -750,17 +750,28 @@ function fallbackCopy(text, done) {
 function uploadJobCard(job) {
   const created = new Date(job.created_at * 1000).toLocaleString();
   const dest = job.dest_folder_name ? ` → ${job.dest_folder_name}` : "";
+  const uploading = job.status === "uploading";
+  const pct = job.total_bytes > 0 ? Math.min(100, (job.bytes_sent / job.total_bytes) * 100) : (job.status === "done" ? 100 : 0);
+  const fillClass = job.status === "done" ? "done" : job.status === "error" ? "failed" : "";
+  const sizeLabel = job.total_bytes > 0 ? `${fmtBytes(job.bytes_sent)} / ${fmtBytes(job.total_bytes)}` : "";
   return `<div class="upload-job">
     <div class="upload-job-row">
       <span class="upload-job-name">[${job.site}] ${job.source_name}${dest}</span>
       <span class="badge ${job.status}">${STATUS_LABELS[job.status] || job.status}</span>
     </div>
     <div class="upload-job-sub">${created}${job.error ? " · " + job.error : ""}</div>
+    ${uploading || job.status === "done" ? `<div class="item">
+      <div class="item-sub">${sizeLabel}</div>
+      <div class="progress-bar"><div class="progress-fill ${fillClass}" style="width:${pct}%"></div></div>
+    </div>` : ""}
     ${job.url ? `<div class="upload-job-link">
       <a href="${job.url}" target="_blank" rel="noopener">${job.url}</a>
       <button type="button" class="btn small" data-copy-link="${job.url}">📋 Copiar</button>
     </div>` : ""}
-    ${job.status === "done" || job.status === "error" ? `<div class="upload-job-actions"><button class="btn small" data-delete-upload="${job.id}">Borrar</button></div>` : ""}
+    ${job.status === "done" || job.status === "error" ? `<div class="upload-job-actions">
+      ${job.status === "error" ? `<button class="btn small" data-retry-upload="${job.id}">Reintentar</button>` : ""}
+      <button class="btn small" data-delete-upload="${job.id}">Borrar</button>
+    </div>` : ""}
   </div>`;
 }
 
@@ -773,6 +784,17 @@ async function refreshUploadJobs() {
     els.uploadJobsList.querySelectorAll("button[data-delete-upload]").forEach((btn) => {
       btn.addEventListener("click", async () => {
         await fetch(`/api/uploads/jobs/${btn.dataset.deleteUpload}`, { method: "DELETE" });
+        refreshUploadJobs();
+      });
+    });
+    els.uploadJobsList.querySelectorAll("button[data-retry-upload]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        try {
+          await fetchJSON(`/api/uploads/jobs/${btn.dataset.retryUpload}/retry`, { method: "POST" });
+        } catch (err) {
+          alert(err.message);
+        }
         refreshUploadJobs();
       });
     });

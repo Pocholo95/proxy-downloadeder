@@ -20,6 +20,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import requests
+from requests_toolbelt.multipart.encoder import MultipartEncoder, MultipartEncoderMonitor
 
 TIMEOUT = 20
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -35,6 +36,44 @@ _SIZE_UNITS = {
 
 class UploadError(Exception):
     pass
+
+
+class _ProgressFile:
+    """Wraps a binary file object so its .read() calls report cumulative
+    bytes read to progress_cb(sent, total) — for FileDitch, the one site
+    that posts a raw file body instead of multipart (MultipartEncoder
+    doesn't apply there)."""
+
+    def __init__(self, fileobj, total, progress_cb):
+        self._f = fileobj
+        self._total = total
+        self._cb = progress_cb
+        self._read = 0
+
+    def read(self, size=-1):
+        chunk = self._f.read(size)
+        if chunk:
+            self._read += len(chunk)
+            self._cb(self._read, self._total)
+        return chunk
+
+    def __len__(self):
+        return self._total
+
+    def __getattr__(self, name):
+        return getattr(self._f, name)
+
+
+def _post_multipart(url, fields, headers, progress_cb, timeout=None):
+    """POST a multipart/form-data body, optionally reporting bytes sent as
+    it streams (rather than requests' default of handing the whole
+    encoded body to the socket in one call with no visibility)."""
+    encoder = MultipartEncoder(fields=fields)
+    body = encoder
+    if progress_cb:
+        body = MultipartEncoderMonitor(encoder, lambda m: progress_cb(m.bytes_read, encoder.len))
+    headers = {**headers, "Content-Type": encoder.content_type}
+    return requests.post(url, data=body, headers=headers, timeout=timeout)
 
 
 def _parse_size(value):
@@ -117,7 +156,7 @@ def gofile_create_folder(token, parent_id, name):
     return data["id"], data.get("name", name)
 
 
-def gofile_upload(token, path, folder_id=None):
+def gofile_upload(token, path, folder_id=None, progress_cb=None):
     """`token` is optional — without one this uploads to a temporary guest
     account (link works, but expires after ~10 days of inactivity and can't
     target a folder). Passing a token makes it permanent and folder-aware."""
@@ -129,7 +168,7 @@ def gofile_upload(token, path, folder_id=None):
         headers["Authorization"] = f"Bearer {token}"
     with open(path, "rb") as f:
         fields["file"] = (Path(path).name, f, mimetypes.guess_type(path)[0] or "application/octet-stream")
-        r = requests.post(_GOFILE_UPLOAD, files=fields, headers=headers, timeout=None)
+        r = _post_multipart(_GOFILE_UPLOAD, fields, headers, progress_cb)
     try:
         data = r.json()
     except ValueError:
@@ -199,7 +238,7 @@ def _bunkr_upload_server(token):
     return f"{parts.scheme}://{parts.netloc}/api"
 
 
-def bunkr_upload(token, path, album_id=None):
+def bunkr_upload(token, path, album_id=None, progress_cb=None):
     info = _bunkr_call("GET", "check", token)
     max_direct = _parse_size(info["chunkSize"]["max"])
     size = Path(path).stat().st_size
@@ -213,8 +252,8 @@ def bunkr_upload(token, path, album_id=None):
 
     if size <= max_direct:
         with open(path, "rb") as f:
-            r = requests.post(f"{server}/upload", files={"files[]": (filename, f, mimetype)},
-                               headers={**_bunkr_headers(token), **headers}, timeout=None)
+            fields = {"files[]": (filename, f, mimetype)}
+            r = _post_multipart(f"{server}/upload", fields, {**_bunkr_headers(token), **headers}, progress_cb)
         result = _json_or_raise(r, "Bunkr")
     else:
         file_uuid = str(uuid.uuid4())
@@ -226,11 +265,15 @@ def bunkr_upload(token, path, album_id=None):
         with open(path, "rb") as f:
             for index in range(total):
                 chunk = f.read(chunk_size)
-                r = requests.post(f"{server}/upload", headers=_bunkr_headers(token), timeout=None,
-                                   data={"dzuuid": file_uuid, "dzchunkindex": str(index),
-                                         "dztotalfilesize": str(size), "dzchunksize": str(chunk_size),
-                                         "dztotalchunkcount": str(total), "dzchunkbyteoffset": str(index * chunk_size)},
-                                   files={"files[]": (filename, chunk, "application/octet-stream")})
+                offset = index * chunk_size
+                fields = {"dzuuid": file_uuid, "dzchunkindex": str(index),
+                          "dztotalfilesize": str(size), "dzchunksize": str(chunk_size),
+                          "dztotalchunkcount": str(total), "dzchunkbyteoffset": str(offset),
+                          "files[]": (filename, chunk, "application/octet-stream")}
+                chunk_cb = None
+                if progress_cb:
+                    chunk_cb = lambda sent, _t, _offset=offset: progress_cb(min(_offset + sent, size), size)
+                r = _post_multipart(f"{server}/upload", fields, _bunkr_headers(token), chunk_cb)
                 _json_or_raise(r, "Bunkr", context=f"chunk {index + 1}/{total}")
         r = requests.post(f"{server}/upload/finishchunks", headers={**_bunkr_headers(token), "Content-Type": "application/json"},
                            timeout=TIMEOUT, json={"files": [{"uuid": file_uuid, "original": filename,
@@ -305,14 +348,14 @@ def filester_create_folder(token, parent_id, name):
     return d["identifier"], d.get("name", name)
 
 
-def filester_upload(token, path, folder_id=None):
+def filester_upload(token, path, folder_id=None, progress_cb=None):
     headers = _filester_headers(token)
     if folder_id:
         headers["X-Folder-ID"] = str(folder_id)
     mimetype = mimetypes.guess_type(path)[0] or "application/octet-stream"
     with open(path, "rb") as f:
-        r = requests.post(f"{_FILESTER_API}/upload", files={"file": (Path(path).name, f, mimetype)},
-                           headers=headers, timeout=None)
+        fields = {"file": (Path(path).name, f, mimetype)}
+        r = _post_multipart(f"{_FILESTER_API}/upload", fields, headers, progress_cb)
     try:
         data = r.json()
     except ValueError:
@@ -329,9 +372,11 @@ def filester_upload(token, path, folder_id=None):
 _FILEDITCH_UPLOAD = "https://new.fileditch.com/upload.php"
 
 
-def fileditch_upload(path):
+def fileditch_upload(path, progress_cb=None):
+    size = Path(path).stat().st_size
     with open(path, "rb") as f:
-        r = requests.post(f"{_FILEDITCH_UPLOAD}?filename={Path(path).name}", data=f,
+        body = _ProgressFile(f, size, progress_cb) if progress_cb else f
+        r = requests.post(f"{_FILEDITCH_UPLOAD}?filename={Path(path).name}", data=body,
                            headers={"User-Agent": USER_AGENT, "Content-Type": "application/octet-stream"},
                            timeout=None)
     try:
@@ -371,7 +416,7 @@ SITES = {
         "verify": None,
         "list_folders": None,
         "create_folder": None,
-        "upload": lambda _token, path, _folder_id=None: fileditch_upload(path),
+        "upload": lambda _token, path, _folder_id=None, progress_cb=None: fileditch_upload(path, progress_cb=progress_cb),
     },
     "filester": {
         "label": "Filester",

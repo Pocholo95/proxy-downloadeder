@@ -287,9 +287,18 @@ De dónde sale cada token:
   en `filester.gg/api-docs`, nada reverse-engineered de este lado).
 
 Las subidas tienen su propio historial persistente (`state/uploads.json`,
-"limpiar completados" igual que las descargas), y una vez que una termina
-bien el link queda ahí con un botón de copiado rápido — no se pierde entre
-recargas ni redeploys del contenedor.
+"limpiar completados" igual que las descargas), con **progreso en vivo**
+(bytes subidos / total, barra de progreso) mientras dura la subida, y una
+vez que termina bien el link queda ahí con un botón de copiado rápido — no
+se pierde entre recargas ni redeploys del contenedor. Si una falla (por
+ejemplo un `502`/timeout del lado del sitio), el botón **"Reintentar"**
+la vuelve a mandar tal cual (mismo sitio, mismo archivo, misma carpeta
+destino) sin tener que elegir el archivo de nuevo — incluso si era uno
+subido desde el dispositivo: ese archivo temporal no se borra hasta que
+la subida termina bien, o hasta que borrás esa entrada del historial (si
+reintentás y volvés a fallar, el archivo temporal "viaja" al intento más
+nuevo, así que borrar un intento viejo del historial nunca compite por el
+mismo archivo con uno que sigue vivo).
 
 ```bash
 docker network create proxy   # una vez, salvo que ya tengas una red externa "proxy" (p. ej. la que usa tu Traefik)
@@ -370,6 +379,7 @@ La API REST que usa el frontend (`GET/POST /api/jobs`, `GET /api/jobs/<id>`,
 `GET /api/uploads/sites`,
 `POST/DELETE /api/uploads/account/<sitio>`, `GET/POST /api/uploads/folders/<sitio>`,
 `GET/POST /api/uploads/jobs`, `GET/DELETE /api/uploads/jobs/<id>`,
+`POST /api/uploads/jobs/<id>/retry`,
 `POST /api/uploads/clear-finished`, `GET/POST /api/ytdlp/jobs`,
 `GET /api/ytdlp/jobs/<id>`, `GET /api/ytdlp/jobs/<id>/log`,
 `POST /api/ytdlp/jobs/<id>/cancel`, `DELETE /api/ytdlp/jobs/<id>`,
