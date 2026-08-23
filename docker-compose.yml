@@ -5,6 +5,7 @@ services:
     container_name: proxy-downloader
     ports:
       - "${WEB_PORT:-8080}:8080"
+      - "${VIDGRID_WEB_PORT:-8090}:8090"
     volumes:
       - ${DOWNLOADS_PATH:-./downloads}:/downloads
       - ${CONFIG_PATH:-./config}:/app/config
@@ -28,6 +29,16 @@ services:
       # ipallowlist middleware:
       # - "traefik.http.middlewares.proxy-downloader-ipallowlist.ipallowlist.sourcerange=10.42.0.0/24"
       # - "traefik.http.routers.proxy-downloader.middlewares=proxy-downloader-ipallowlist"
+
+      # VidGrid (thumbnail grid generator) — same container, second process
+      # (supervisord), own port/subdomain. No auth either, and its API can
+      # run arbitrary ffmpeg args — same trust boundary as this app, so the
+      # same "restrict to your LAN/VPN" note above applies here too.
+      - "traefik.enable=${TRAEFIK_ENABLE:-false}"
+      - "traefik.http.routers.vidgrid.rule=Host(`${TRAEFIK_VIDGRID_HOST:-vidgrid.localhost}`)"
+      - "traefik.http.routers.vidgrid.entrypoints=${TRAEFIK_ENTRYPOINTS:-websecure}"
+      - "traefik.http.routers.vidgrid.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}"
+      - "traefik.http.services.vidgrid.loadbalancer.server.port=8090"
     restart: unless-stopped
 
 networks:

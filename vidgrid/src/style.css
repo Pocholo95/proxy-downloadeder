@@ -1,0 +1,194 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *, .classic *));
+
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --selected: oklch(0.55 0.15 250);
+  --selected-foreground: oklch(0.985 0 0);
+  --radius: 0.625rem;
+  --shadow-sm: 0 1px 4px rgba(0, 0, 0, 0.1);
+  --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.12), 0 2px 4px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 12px 18px rgba(0, 0, 0, 0.14), 0 4px 8px rgba(0, 0, 0, 0.08);
+  --shadow-xl: 0 20px 28px rgba(0, 0, 0, 0.14), 0 8px 12px rgba(0, 0, 0, 0.1);
+  --shadow-2xl: 0 25px 50px rgba(0, 0, 0, 0.2);
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(1 0 0 / 15%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --selected: oklch(0.75 0.2 250);
+  --selected-foreground: oklch(0.145 0 0);
+  --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.7), 0 -1px 0 rgba(255, 255, 255, 0.06);
+  --shadow-md:
+    0 6px 12px rgba(0, 0, 0, 0.75), 0 2px 6px rgba(0, 0, 0, 0.6),
+    0 -1px 0 rgba(255, 255, 255, 0.06);
+  --shadow-lg:
+    0 12px 24px rgba(0, 0, 0, 0.8), 0 4px 10px rgba(0, 0, 0, 0.6),
+    0 -1px 0 rgba(255, 255, 255, 0.07);
+  --shadow-xl:
+    0 20px 36px rgba(0, 0, 0, 0.85), 0 8px 14px rgba(0, 0, 0, 0.6),
+    0 -1px 0 rgba(255, 255, 255, 0.07);
+  --shadow-2xl:
+    0 28px 56px rgba(0, 0, 0, 0.9), 0 -1px 0 rgba(255, 255, 255, 0.07);
+}
+
+/*
+ * "dimmed" theme - an intermediary between dark and light
+ * Provides reduced eye strain with softer colors (lighter background)
+ * Apply via <html class="dimmed">.
+  */
+.dimmed {
+  color-scheme: light;
+  --background: oklch(0.94 0.006 250);
+  --foreground: oklch(0.22 0.01 250);
+  --card: oklch(0.965 0.004 250);
+  --card-foreground: oklch(0.22 0.01 250);
+  --popover: oklch(0.98 0.004 250);
+  --popover-foreground: oklch(0.22 0.01 250);
+  --primary: oklch(0.52 0.12 250);
+  --primary-foreground: oklch(0.98 0.01 250);
+  --secondary: oklch(0.9 0.01 250);
+  --secondary-foreground: oklch(0.32 0.02 250);
+  --muted: oklch(0.91 0.008 250);
+  --muted-foreground: oklch(0.5 0.01 250);
+  --accent: oklch(0.88 0.015 250);
+  --accent-foreground: oklch(0.22 0.01 250);
+  --destructive: oklch(0.64 0.2 25);
+  --destructive-foreground: oklch(0.98 0.01 250);
+  --border: oklch(0.84 0.01 250);
+  --input: oklch(0.82 0.01 250);
+  --ring: oklch(0.56 0.11 250);
+  --selected: oklch(39.704% 0.10246 249.315);
+  --selected-foreground: oklch(0.93 0.01 256);
+  --shadow-sm: 0 1px 4px rgba(0, 0, 0, 0.1);
+  --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.12), 0 2px 4px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 12px 18px rgba(0, 0, 0, 0.14), 0 4px 8px rgba(0, 0, 0, 0.08);
+  --shadow-xl: 0 20px 28px rgba(0, 0, 0, 0.14), 0 8px 12px rgba(0, 0, 0, 0.1);
+  --shadow-2xl: 0 25px 50px rgba(0, 0, 0, 0.2);
+}
+
+/*
+ * "classic" theme, the original navy + sky-blue palette
+ * from the pre-radix style.css. Apply via <html class="classic">.
+   */
+.classic {
+  color-scheme: dark;
+  --background: oklch(0.21 0.04 264);
+  --foreground: oklch(0.93 0.01 256);
+  --card: oklch(0.25 0.04 264);
+  --card-foreground: oklch(0.93 0.01 256);
+  --popover: oklch(0.25 0.04 264);
+  --popover-foreground: oklch(0.93 0.01 256);
+  --primary: oklch(0.74 0.15 230);
+  --primary-foreground: oklch(0.16 0.04 264);
+  --secondary: oklch(0.28 0.04 264);
+  --secondary-foreground: oklch(0.93 0.01 256);
+  --muted: oklch(0.28 0.04 264);
+  --muted-foreground: oklch(0.65 0.025 256);
+  --accent: oklch(0.83 0.1 230);
+  --accent-foreground: oklch(0.93 0.01 256);
+  --destructive: oklch(0.69 0.2 23);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.83 0.1 230 / 0.22);
+  --input: oklch(0.83 0.1 230 / 0.22);
+  --ring: oklch(0.74 0.15 230);
+  --selected: oklch(68.083% 0.12435 179.073);
+  --selected-foreground: oklch(0.145 0 0);
+  --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.7), 0 -1px 0 rgba(255, 255, 255, 0.07);
+  --shadow-md:
+    0 6px 12px rgba(0, 0, 0, 0.75), 0 2px 6px rgba(0, 0, 0, 0.6),
+    0 -1px 0 rgba(255, 255, 255, 0.07);
+  --shadow-lg:
+    0 12px 24px rgba(0, 0, 0, 0.8), 0 4px 10px rgba(0, 0, 0, 0.6),
+    0 -1px 0 rgba(255, 255, 255, 0.08);
+  --shadow-xl:
+    0 20px 36px rgba(0, 0, 0, 0.85), 0 8px 14px rgba(0, 0, 0, 0.6),
+    0 -1px 0 rgba(255, 255, 255, 0.08);
+  --shadow-2xl:
+    0 28px 56px rgba(0, 0, 0, 0.9), 0 -1px 0 rgba(255, 255, 255, 0.08);
+}
+
+@layer utilities {
+  .first-letter-capitalize::first-letter {
+    text-transform: uppercase;
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-selected: var(--selected);
+  --color-selected-foreground: var(--selected-foreground);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --shadow-xl: var(--shadow-xl);
+  --shadow-2xl: var(--shadow-2xl);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=VidGrid
+Comment=Generate video thumbnail grids
+Exec=/home/pclo/Documents/vidgrid-html-master/run.sh
+Icon=/home/pclo/Documents/vidgrid-html-master/public/logo.png
+Terminal=true
+Categories=AudioVideo;
+StartupNotify=true

@@ -8,3 +8,13 @@ urls.txt
 downloads/
 state/
 .env
+# VidGrid's own .env is non-secret build-time metadata (project name,
+# upstream URL) baked into its Vite build — needs to actually be
+# committed, unlike this repo's own .env (deployment config/secrets).
+!vidgrid/.env
+
+# VidGrid: node_modules/dist are rebuilt fresh by the Docker build's Node
+# stage (see Dockerfile) — never need to be committed.
+vidgrid/node_modules/
+vidgrid/dist/
+vidgrid/desktop/__pycache__/

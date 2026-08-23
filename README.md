@@ -391,6 +391,41 @@ La API REST que usa el frontend (`GET/POST /api/jobs`, `GET /api/jobs/<id>`,
 `POST /api/ytdlp/clear-finished`) es la misma que consume la página — se
 puede scriptear igual.
 
+## VidGrid (incluido en la misma imagen)
+
+La imagen también trae [VidGrid](vidgrid/README.md), un generador de
+grillas de miniaturas/contact sheets para video (JPG estático, WebP/MP4
+animado, modo secuencia, galería, soporte VR) con `ffmpeg` real — nada de
+WASM, todo por CPU, sin GPU en juego en ningún lado. Es MIT, de un
+proyecto de terceros (`aknott`), vendorizado bajo `vidgrid/` con dos
+cambios propios respecto al original: su servidor solo escuchaba en
+`127.0.0.1` con puerto efímero (pensado para desktop puro), y ahora lee
+`VIDGRID_HOST`/`VIDGRID_PORT` para poder exponerlo igual que esta app; y
+`webbrowser.open()` al arrancar ahora es opcional (`VIDGRID_NO_BROWSER=1`,
+ya seteado en la imagen) para no tronar en un contenedor sin navegador.
+
+Build multi-stage: un stage con Node arma su frontend (Vite/React) a
+`dist/`, el stage final copia ese `dist/` + su backend Python (sin
+dependencias más allá de la stdlib) y corre **dos procesos en el mismo
+contenedor** vía `supervisord` (`supervisord.conf`) — gunicorn para esta
+app, `python -m desktop.app` para VidGrid — cada uno en su puerto
+(`8080`/`8090`, configurable por afuera con `WEB_PORT`/`VIDGRID_WEB_PORT`
+igual que ya hacía este proyecto).
+
+Comparte el volumen `/downloads` con esta app. Como su backend corre en
+la misma máquina que los archivos (literal, mismo contenedor), en vez de
+subir un archivo por el navegador podés **pegar el path directo**
+(`/downloads/lo-que-sea.mp4`) en el campo "…or paste a file/folder path"
+de la pantalla principal — lo escanea/analiza en el filesystem sin
+tocar la red, mismo mecanismo que ya usaba para uso desktop local
+("la app y los archivos están en la misma máquina").
+
+Mismo modelo de confianza que el resto de esta app: **sin autenticación**.
+Su API (`/api/tasks/exec` en particular) corre `ffmpeg` con los argumentos
+que arma el frontend — pensado originalmente para loopback únicamente, así
+que si tu Traefik queda expuesto más allá de tu tailnet/LAN, la misma nota
+de `ipallowlist` del `docker-compose.yml` aplica acá también.
+
 ## Agregar un sitio nuevo
 
 1. Creá `proxy_downloader/sites/<tunombre>.py` con una clase que herede de
