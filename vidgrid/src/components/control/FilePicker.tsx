@@ -1,10 +1,28 @@
 import * as React from "react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { FolderOpen, Upload } from "lucide-react";
 import { Field, FieldLabel } from "@/components/ui/field";
 import type { VideoSource } from "@/types";
 import { errlog } from "@/utils";
 import { nativeApi, type ScannedFile } from "@/services/nativeApi";
+
+function fmtSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(0)} KB`;
+  const mb = kb / 1024;
+  if (mb < 1024) return `${mb.toFixed(1)} MB`;
+  return `${(mb / 1024).toFixed(2)} GB`;
+}
 
 interface Props {
   onSourcesChange: (sources: VideoSource[]) => void;
@@ -74,6 +92,8 @@ export default function FilePicker({ onSourcesChange }: Props) {
   const [dragActive, setDragActive] = React.useState(false);
   const [pathError, setPathError] = React.useState<string | null>(null);
   const [sharedDir, setSharedDir] = React.useState("");
+  const [browseResults, setBrowseResults] = React.useState<ScannedFile[] | null>(null);
+  const [selectedPaths, setSelectedPaths] = React.useState<Set<string>>(new Set());
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
@@ -119,6 +139,10 @@ export default function FilePicker({ onSourcesChange }: Props) {
     void ingestFiles(files);
   };
 
+  // Scans the path and opens the picker dialog below rather than adding
+  // everything found straight away -- a shared folder (the common case
+  // this backs) can easily hold way more videos than you want in one
+  // batch, so nothing gets added until you explicitly pick some.
   const handleScanPath = async (path: string) => {
     if (!path.trim()) return;
     setBusy(true);
@@ -128,8 +152,8 @@ export default function FilePicker({ onSourcesChange }: Props) {
       if (!found.length) {
         setPathError("No video files found at that path.");
       } else {
-        onSourcesChange(found.map(scannedToVideoSource));
-        flashSuccess();
+        setBrowseResults(found);
+        setSelectedPaths(new Set());
       }
     } catch (e) {
       setPathError(e instanceof Error ? e.message : String(e));
@@ -137,6 +161,30 @@ export default function FilePicker({ onSourcesChange }: Props) {
     } finally {
       setBusy(false);
     }
+  };
+
+  const toggleOne = (path: string, checked: boolean) => {
+    setSelectedPaths((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(path);
+      else next.delete(path);
+      return next;
+    });
+  };
+
+  const toggleAll = (checked: boolean) => {
+    setSelectedPaths(checked ? new Set((browseResults ?? []).map((f) => f.path)) : new Set());
+  };
+
+  const confirmSelection = () => {
+    if (!browseResults) return;
+    const chosen = browseResults.filter((f) => selectedPaths.has(f.path));
+    if (chosen.length) {
+      onSourcesChange(chosen.map(scannedToVideoSource));
+      flashSuccess();
+    }
+    setBrowseResults(null);
+    setSelectedPaths(new Set());
   };
 
   return (
@@ -195,6 +243,71 @@ export default function FilePicker({ onSourcesChange }: Props) {
         )}
         {pathError && <p className="text-xs text-destructive">{pathError}</p>}
       </div>
+
+      <Dialog
+        open={browseResults !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setBrowseResults(null);
+            setSelectedPaths(new Set());
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Select videos to add</DialogTitle>
+            <DialogDescription>
+              Found {browseResults?.length ?? 0} video file
+              {browseResults?.length === 1 ? "" : "s"} at {sharedDir}.
+            </DialogDescription>
+          </DialogHeader>
+          <label className="flex items-center gap-2 border-b pb-2 text-sm font-medium">
+            <Checkbox
+              checked={
+                browseResults !== null &&
+                browseResults.length > 0 &&
+                selectedPaths.size === browseResults.length
+              }
+              onCheckedChange={(checked) => toggleAll(checked === true)}
+            />
+            Select all
+          </label>
+          <div className="flex max-h-80 flex-col gap-1 overflow-y-auto">
+            {browseResults?.map((f) => (
+              <label
+                key={f.path}
+                className="flex items-center gap-2 rounded-md px-1 py-1.5 text-sm hover:bg-accent"
+              >
+                <Checkbox
+                  checked={selectedPaths.has(f.path)}
+                  onCheckedChange={(checked) => toggleOne(f.path, checked === true)}
+                />
+                <span className="flex-1 truncate" title={f.path}>
+                  {f.name}
+                </span>
+                <span className="text-muted-foreground shrink-0 text-xs">
+                  {fmtSize(f.size)}
+                </span>
+              </label>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setBrowseResults(null);
+                setSelectedPaths(new Set());
+              }}
+            >
+              Cancel
+            </Button>
+            <Button type="button" onClick={confirmSelection} disabled={selectedPaths.size === 0}>
+              Add {selectedPaths.size || ""} selected
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Field>
   );
 }

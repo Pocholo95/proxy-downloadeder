@@ -413,22 +413,18 @@ app, `python -m desktop.app` para VidGrid — cada uno en su puerto
 igual que ya hacía este proyecto).
 
 Comparte el volumen `/downloads` con esta app. Como su backend corre en
-la misma máquina que los archivos (literal, mismo contenedor), en vez de
-subir un archivo por el navegador podés **pegar el path directo**
-(`/downloads/lo-que-sea.mp4` o solo `/downloads` para una carpeta entera)
-en el campo "…or paste a file/folder path" de la pantalla principal — lo
-escanea/analiza en el filesystem sin tocar la red, mismo mecanismo que ya
-usaba para uso desktop local ("la app y los archivos están en la misma
-máquina"). Ojo: el botón "Add folder…" es el picker nativo del
-**navegador** — abre el filesystem de tu dispositivo, no el del servidor;
-para listar lo que ya bajó esta app hay que usar el campo de texto, no
-ese botón. Para no tener que tipearlo cada vez, la imagen setea
-`VIDGRID_SHARED_DIR=/downloads`, que hace aparecer un botón
-**"Browse /downloads"** de un click arriba del campo de texto (agregado
-propio, no está en el VidGrid original — `/api/shared_dir` +
+la misma máquina que los archivos (literal, mismo contenedor), la imagen
+setea `VIDGRID_SHARED_DIR=/downloads`, que hace aparecer un botón
+**"Browse /downloads"** en la pantalla principal (agregado propio, no
+está en el VidGrid original — `/api/shared_dir` +
 `nativeApi.getSharedDir()`; si esa variable no está seteada, el botón
 simplemente no aparece, así que el desktop app original sigue andando
-igual sin esto).
+igual sin esto). Lo escanea/analiza en el filesystem sin tocar la red,
+mismo mecanismo que ya usaba para uso desktop local ("la app y los
+archivos están en la misma máquina") — y abre un **diálogo con
+checkboxes** para elegir cuáles de los encontrados agregar, no los tira
+todos de una (una carpeta compartida puede tener muchísimos videos
+acumulados; nada se agrega hasta que elijas explícitamente cuáles).
 
 También podés **subir un archivo desde tu dispositivo** para procesarlo
 sin que quede permanentemente en `/downloads` — botones "Add videos…"/
