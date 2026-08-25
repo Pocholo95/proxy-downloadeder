@@ -174,6 +174,38 @@ Hay tres niveles, de más a menos prioridad:
 más adelante (hoy solo tiene `use_proxy`) sin tocar el código Python de cada
 uno.
 
+### Fuentes de proxy
+
+Por defecto, el proxy viene de una **lista pública gratis** (URL en
+`config.py`, texto plano, un `host:port` por línea) — se descarga, se
+valida cada uno en paralelo, y se rota/descarta según ande. Ese sigue
+siendo el comportamiento de fábrica, pero ahora es una de varias fuentes
+posibles, configurables desde la sección **"Fuentes de proxy"** de la web
+UI (o a mano en `config/proxy_sources.json`) — siempre hay exactamente
+una **activa**, global para toda la app (no por descarga).
+
+Dos tipos de fuente:
+
+- **Lista pública**: como la de fábrica — cualquier URL que devuelva una
+  lista de proxies en texto plano, uno por línea.
+- **Gateway autenticado**: para proxies **pagos** tipo
+  [Decodo](https://decodo.com/) (o cualquier proveedor con el mismo
+  esquema: un endpoint fijo `host:puerto` + usuario/contraseña, donde la
+  rotación de IP la hace el proveedor del lado de ellos, no acá). No hay
+  nada que descargar ni validar — se arma una URL de proxy con las
+  credenciales (`http://usuario:pass@host:puerto`) y se usa tal cual en
+  cada descarga; nunca se descarta ni se banea localmente (no hay a qué
+  más rotar de este lado, y una conexión nueva contra un gateway rotativo
+  ya suele traer una IP de salida distinta por su cuenta). La contraseña
+  se guarda en `config/proxy_sources.json` (gitignored) y la API/UI nunca
+  la vuelve a mostrar una vez guardada.
+
+```bash
+curl -X POST http://localhost:8080/api/proxy-sources \
+  -H "Content-Type: application/json" \
+  -d '{"type":"gateway","name":"Decodo","host":"gate.decodo.com","port":10001,"username":"tu-usuario","password":"tu-contraseña"}'
+```
+
 ### CAPTCHA y bloqueos por IP (1fichier)
 
 1fichier bloquea directo cualquier IP que detecte como datacenter/proxy/VPN
@@ -378,7 +410,9 @@ La API REST que usa el frontend (`GET/POST /api/jobs`, `GET /api/jobs/<id>`,
 `GET /api/jobs/<id>/log`, `POST /api/jobs/<id>/cancel`,
 `POST /api/jobs/<id>/retry`, `DELETE /api/jobs/<id>`,
 `POST /api/jobs/clear-finished`, `GET /api/sites`,
-`POST /api/sites/<nombre>/proxy`, `GET/DELETE /api/files`,
+`POST /api/sites/<nombre>/proxy`,
+`GET/POST /api/proxy-sources`, `POST /api/proxy-sources/<id>/activate`,
+`DELETE /api/proxy-sources/<id>`, `GET/DELETE /api/files`,
 `POST /api/files/rename`,
 `GET /api/files/download`, `GET /api/files/preview`, `POST /api/files/optimize`,
 `GET /api/uploads/sites`,

@@ -21,8 +21,9 @@ detected") at step 1, before any wait or captcha — and that's what free
 public proxy lists are made of. So proxy rotation, which helps on every other
 site here, mostly just burns through the pool hitting that same block on
 this one; see use_proxy_by_default below. A real residential IP (your own
-connection via --no-proxy, or a residential-proxy source you swap into
-PROXIES_URL) is what actually gets past it. 1fichier's own pricing page also
+connection via --no-proxy, or a residential-proxy gateway source added via
+proxy_sources.py/the webui's "Fuentes de proxy" section) is what actually
+gets past it. 1fichier's own pricing page also
 documents a reCAPTCHA for guest downloads (didn't happen in our live tests,
 but it's real) — we can't solve that either. Both cases raise RateLimited so
 the engine moves to the next proxy without blacklisting a perfectly fine
@@ -72,8 +73,8 @@ class FichierProvider(SiteProvider):
     # lists are made of. In practice that means proxy mode here burns
     # through the whole pool hitting the same block rather than helping, so
     # it defaults off (like Mediafire) — a real residential IP (--no-proxy,
-    # or your own residential-proxy source swapped into PROXIES_URL) is what
-    # actually gets past it. --proxy still forces it on if you have one.
+    # or a residential-proxy gateway source added via proxy_sources.py) is
+    # what actually gets past it. --proxy still forces it on if you have one.
     use_proxy_by_default = False
 
     def __init__(self):

@@ -22,8 +22,7 @@ from pathlib import Path
 import yt_dlp
 from yt_dlp.utils import DownloadCancelled
 
-from ..config import PROXIES_URL
-from ..proxy import ProxyCache, ProxyPool, fetch_proxy_list
+from .. import proxy_sources
 from . import video_optimize
 
 TERMINAL_STATUSES = {"done", "error", "cancelled"}
@@ -290,14 +289,9 @@ class YtdlpManager:
                 self._persist()
 
     def _pick_proxy(self, job):
-        raw = fetch_proxy_list(PROXIES_URL)
-        if not raw:
-            job._append_log("No se pudo obtener la lista de proxies")
-            return None
-        cache = ProxyCache(str(self.state_dir / "working_proxies.json"))
-        pool = ProxyPool(raw, PROXIES_URL, cache)
-        if pool.initial_load() == 0:
-            job._append_log("No hay proxies funcionando")
+        pool, error = proxy_sources.build_pool(str(self.state_dir / "working_proxies.json"))
+        if not pool:
+            job._append_log(error)
             return None
         return pool.get_next()
 

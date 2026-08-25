@@ -50,6 +50,21 @@ const els = {
   uploadClearFinished: document.getElementById("upload-clear-finished"),
   videoJobsList: document.getElementById("video-jobs-list"),
   videoClearFinished: document.getElementById("video-clear-finished"),
+  toggleProxySources: document.getElementById("toggle-proxy-sources"),
+  proxySourcesPanel: document.getElementById("proxy-sources-panel"),
+  proxySourcesList: document.getElementById("proxy-sources-list"),
+  psType: document.getElementById("ps-type"),
+  psName: document.getElementById("ps-name"),
+  psFieldsList: document.getElementById("ps-fields-list"),
+  psFieldsGateway: document.getElementById("ps-fields-gateway"),
+  psUrl: document.getElementById("ps-url"),
+  psScheme: document.getElementById("ps-scheme"),
+  psHost: document.getElementById("ps-host"),
+  psPort: document.getElementById("ps-port"),
+  psUsername: document.getElementById("ps-username"),
+  psPassword: document.getElementById("ps-password"),
+  psAddBtn: document.getElementById("ps-add-btn"),
+  psError: document.getElementById("ps-error"),
 };
 
 els.tabs.forEach((tab) => {
@@ -78,6 +93,10 @@ function switchToUploadTab() {
 
 els.toggleSites.addEventListener("click", () => {
   els.sitesList.classList.toggle("hidden");
+});
+
+els.toggleProxySources.addEventListener("click", () => {
+  els.proxySourcesPanel.classList.toggle("hidden");
 });
 
 els.clearFinished.addEventListener("click", async () => {
@@ -219,6 +238,88 @@ async function refreshSites() {
     els.sitesList.innerHTML = `<p class="error-msg">${err.message}</p>`;
   }
 }
+
+function proxySourceRow(source) {
+  const detail = source.type === "list"
+    ? source.url
+    : `${source.scheme}://${source.username}:••••••@${source.host}:${source.port}`;
+  return `<div class="job">
+    <div class="job-head">
+      <div>
+        <div class="job-title">${source.name}${source.active ? " ★" : ""}</div>
+        <div class="job-meta">${source.type === "list" ? "Lista pública" : "Gateway autenticado"} · ${detail}</div>
+      </div>
+      ${source.active ? `<span class="badge done">activa</span>` : ""}
+    </div>
+    <div class="job-actions">
+      ${!source.active ? `<button class="btn small" data-activate-source="${source.id}">Usar esta</button>` : ""}
+      <button class="btn small danger" data-delete-source="${source.id}">Borrar</button>
+    </div>
+  </div>`;
+}
+
+async function refreshProxySources() {
+  try {
+    const sourcesList = await fetchJSON("/api/proxy-sources");
+    els.proxySourcesList.innerHTML = sourcesList.map(proxySourceRow).join("");
+    els.proxySourcesList.querySelectorAll("button[data-activate-source]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        await fetchJSON(`/api/proxy-sources/${btn.dataset.activateSource}/activate`, { method: "POST" });
+        refreshProxySources();
+      });
+    });
+    els.proxySourcesList.querySelectorAll("button[data-delete-source]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        if (!confirm("¿Borrar esta fuente de proxy?")) return;
+        try {
+          await fetchJSON(`/api/proxy-sources/${btn.dataset.deleteSource}`, { method: "DELETE" });
+          refreshProxySources();
+        } catch (err) {
+          alert(err.message);
+        }
+      });
+    });
+  } catch (err) {
+    els.proxySourcesList.innerHTML = `<p class="error-msg">${err.message}</p>`;
+  }
+}
+
+els.psType.addEventListener("change", () => {
+  const isGateway = els.psType.value === "gateway";
+  els.psFieldsList.classList.toggle("hidden", isGateway);
+  els.psFieldsGateway.classList.toggle("hidden", !isGateway);
+});
+
+els.psAddBtn.addEventListener("click", async () => {
+  els.psError.textContent = "";
+  const type = els.psType.value;
+  const body = { type, name: els.psName.value.trim() };
+  if (type === "list") {
+    body.url = els.psUrl.value.trim();
+  } else {
+    body.scheme = els.psScheme.value;
+    body.host = els.psHost.value.trim();
+    body.port = els.psPort.value;
+    body.username = els.psUsername.value.trim();
+    body.password = els.psPassword.value;
+  }
+  try {
+    await fetchJSON("/api/proxy-sources", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    els.psName.value = "";
+    els.psUrl.value = "";
+    els.psHost.value = "";
+    els.psPort.value = "";
+    els.psUsername.value = "";
+    els.psPassword.value = "";
+    refreshProxySources();
+  } catch (err) {
+    els.psError.textContent = err.message;
+  }
+});
 
 function itemProgress(item) {
   const pct = item.total > 0 ? Math.min(100, (item.bytes_done / item.total) * 100) : (item.status === "done" ? 100 : 0);
@@ -892,6 +993,7 @@ els.videoClearFinished.addEventListener("click", async () => {
 });
 
 refreshSites();
+refreshProxySources();
 refreshJobs();
 refreshUploadSites();
 refreshUploadJobs();

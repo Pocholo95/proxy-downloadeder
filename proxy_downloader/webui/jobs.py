@@ -31,10 +31,10 @@ from types import SimpleNamespace
 
 from .. import site_prefs
 from ..cli import _resolve_folder_jobs, _job_uses_proxy, FOLDER_LABEL_RE
-from ..config import PROXIES_URL, MIN_SPEED_KB
+from ..config import MIN_SPEED_KB
 from ..core import registry
 from ..core.downloader import download_file, download_direct
-from ..proxy import ProxyCache, ProxyPool, fetch_proxy_list
+from .. import proxy_sources
 from ..ui import console
 from ..utils import sanitize_filename
 from . import video_optimize
@@ -412,15 +412,9 @@ class JobManager:
                 with job.lock:
                     job.status = "fetching_proxies"
                 self._persist()
-                raw = fetch_proxy_list(PROXIES_URL)
-                if raw:
-                    cache = ProxyCache(str(self.state_dir / "working_proxies.json"))
-                    proxy_pool = ProxyPool(raw, PROXIES_URL, cache)
-                    if proxy_pool.initial_load() == 0:
-                        job.log("No working proxies found — jobs needing a proxy will fail")
-                        proxy_pool = None
-                else:
-                    job.log("Could not fetch the proxy list")
+                proxy_pool, error = proxy_sources.build_pool(str(self.state_dir / "working_proxies.json"))
+                if error:
+                    job.log(error)
 
             with job.lock:
                 job.status = "running"

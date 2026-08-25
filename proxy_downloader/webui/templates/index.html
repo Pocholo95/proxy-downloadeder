@@ -88,6 +88,68 @@ https://1fichier.com/?XXXXXXXXX"></textarea>
       <div id="sites-list" class="hidden"></div>
     </section>
 
+    <section class="card" id="proxy-sources-card">
+      <h2>Fuentes de proxy
+        <button type="button" class="btn small" id="toggle-proxy-sources">mostrar/ocultar</button>
+      </h2>
+      <div id="proxy-sources-panel" class="hidden">
+        <div id="proxy-sources-list"></div>
+
+        <h4 style="margin:16px 0 10px;">Agregar fuente</h4>
+        <div class="field-row">
+          <div class="field">
+            <label for="ps-type">Tipo</label>
+            <select id="ps-type">
+              <option value="list">Lista pública (URL)</option>
+              <option value="gateway">Gateway autenticado (proxy pago — Decodo y similares)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="ps-name">Nombre</label>
+            <input type="text" id="ps-name" placeholder="Mi lista / Decodo">
+          </div>
+        </div>
+
+        <div class="field-row" id="ps-fields-list">
+          <div class="field">
+            <label for="ps-url">URL de la lista (texto plano, un proxy por línea)</label>
+            <input type="text" id="ps-url" placeholder="https://.../proxies.txt">
+          </div>
+        </div>
+
+        <div class="field-row hidden" id="ps-fields-gateway">
+          <div class="field">
+            <label for="ps-scheme">Esquema</label>
+            <select id="ps-scheme">
+              <option value="http">http</option>
+              <option value="https">https</option>
+              <option value="socks5">socks5</option>
+              <option value="socks4">socks4</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="ps-host">Host</label>
+            <input type="text" id="ps-host" placeholder="gate.decodo.com">
+          </div>
+          <div class="field">
+            <label for="ps-port">Puerto</label>
+            <input type="number" id="ps-port" placeholder="7000">
+          </div>
+          <div class="field">
+            <label for="ps-username">Usuario</label>
+            <input type="text" id="ps-username">
+          </div>
+          <div class="field">
+            <label for="ps-password">Contraseña</label>
+            <input type="password" id="ps-password">
+          </div>
+        </div>
+
+        <button type="button" class="btn" id="ps-add-btn">Agregar fuente</button>
+        <span class="error-msg" id="ps-error"></span>
+      </div>
+    </section>
+
     <section class="card" id="files-card">
       <h2>Archivos
         <button type="button" class="btn small" id="toggle-files">mostrar/ocultar</button>

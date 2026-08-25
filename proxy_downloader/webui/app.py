@@ -10,6 +10,7 @@ from flask import Flask, jsonify, request, render_template, send_file, after_thi
 from werkzeug.utils import secure_filename
 
 from .. import sites  # noqa: F401  (import triggers site provider registration)
+from .. import proxy_sources
 from . import files as files_api
 from . import upload_sites
 from . import video_optimize
@@ -43,6 +44,48 @@ def api_set_site_proxy(name):
     action = data.get("action")
     try:
         manager.set_site_proxy(name, action)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"ok": True})
+
+
+@app.get("/api/proxy-sources")
+def api_list_proxy_sources():
+    return jsonify(proxy_sources.list_sources())
+
+
+@app.post("/api/proxy-sources")
+def api_add_proxy_source():
+    data = request.get_json(silent=True) or {}
+    kind = data.get("type")
+    try:
+        if kind == "list":
+            source_id = proxy_sources.add_list_source(data.get("name"), data.get("url"))
+        elif kind == "gateway":
+            source_id = proxy_sources.add_gateway_source(
+                data.get("name"), data.get("host"), data.get("port"),
+                data.get("username"), data.get("password"), data.get("scheme", "http"),
+            )
+        else:
+            return jsonify({"error": "type debe ser 'list' o 'gateway'"}), 400
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"id": source_id}), 201
+
+
+@app.post("/api/proxy-sources/<source_id>/activate")
+def api_activate_proxy_source(source_id):
+    try:
+        proxy_sources.set_active(source_id)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"ok": True})
+
+
+@app.delete("/api/proxy-sources/<source_id>")
+def api_delete_proxy_source(source_id):
+    try:
+        proxy_sources.delete_source(source_id)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     return jsonify({"ok": True})

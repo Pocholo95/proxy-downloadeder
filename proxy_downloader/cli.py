@@ -16,10 +16,10 @@ from rich import box
 
 from . import sites  # noqa: F401  (import triggers site provider registration)
 from . import site_prefs
-from .config import MIN_SPEED_KB, PROXIES_URL, MAX_CHECK_THREADS
+from . import proxy_sources
+from .config import MIN_SPEED_KB, MAX_CHECK_THREADS, CACHE_FILE
 from .core import registry
 from .core.downloader import download_file, download_direct
-from .proxy import ProxyCache, ProxyPool, fetch_proxy_list
 from .ui import console
 from .utils import sanitize_filename, comment_batch_line
 
@@ -300,12 +300,9 @@ def main():
     needs_proxy = any(_job_uses_proxy(provider, args) for provider, _, _, _, _ in jobs)
     proxy_pool = None
     if needs_proxy:
-        raw_proxies = fetch_proxy_list(PROXIES_URL)
-        if not raw_proxies:
-            sys.exit(1)
-        proxy_pool = ProxyPool(raw_proxies, PROXIES_URL, ProxyCache())
-        if proxy_pool.initial_load() == 0:
-            console.print("[red]✗ No working proxies found[/red]")
+        proxy_pool, error = proxy_sources.build_pool(CACHE_FILE)
+        if not proxy_pool:
+            console.print(f"[red]✗ {error}[/red]")
             sys.exit(1)
         console.print()
     elif args.no_proxy:
