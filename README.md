@@ -15,6 +15,7 @@ proxy_downloader/
   core/
     base.py                  SiteProvider — la interfaz que implementa cada sitio
     downloader.py             motor de descarga genérico (resume, velocidad, integridad)
+    aria2.py                   wrapper del binario aria2c (descargas sin rotación de proxy)
     registry.py                registro de sitios + auto-detección por dominio
   sites/
     pixeldrain.py             sitio con URL de descarga estable (caso simple)
@@ -141,6 +142,23 @@ descarga va **con proxy** — si un proxy cae por debajo de eso, se
 descarta y rota al siguiente. Sin proxy (`--no-proxy`, o un sitio con
 `use_proxy_by_default = False`) no hay a qué rotar, así que este chequeo no
 corre.
+
+Ese mismo camino sin proxy es el que usa [aria2](https://aria2.github.io/)
+como motor de descarga real (`proxy_downloader/core/aria2.py`) en vez de
+una sola conexión `requests` — resume, verificación de integridad y
+descarga por múltiples conexiones simultáneas, todo maneja aria2 solo
+(control file `.aria2` al lado del `.part`, nada que este proyecto tenga
+que llevar la cuenta a mano). El camino **con** proxy (`download_file`) se
+queda en `requests`, porque aria2 no tiene forma de saltar a otro proxy a
+mitad de una descarga como sí hace la rotación por velocidad de este
+proyecto — por eso "aria2 en todo lo que se pueda, menos donde hay que
+rotar proxy". Mismo motor para el endpoint del userscript de Violentmonkey
+(nunca usa proxy) y, como downloader externo de yt-dlp, para la pestaña
+"Video (yt-dlp)" cuando el modo de proxy es "Auto" o "Sin proxy" (con
+"Forzar proxy" yt-dlp vuelve a su downloader nativo, ya que aria2 tampoco
+puede rotar ahí). Requiere el binario `aria2c` (ya viene en el
+`Dockerfile`; para correr la CLI local hace falta instalarlo aparte,
+p. ej. `apt install aria2` / `brew install aria2`).
 
 Hay tres niveles, de más a menos prioridad:
 

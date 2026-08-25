@@ -23,7 +23,12 @@ WORKDIR /app
 # supervisor: runs proxy-downloader and VidGrid as two processes in one
 # container (see supervisord.conf) — Docker wants a single foreground
 # process, and this is it.
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg supervisor \
+# aria2: the actual fetch engine (resumable, multi-connection) for every
+# download that doesn't need per-chunk proxy rotation -- see
+# proxy_downloader/core/aria2.py. Proxy-pool downloads stay on `requests`,
+# since aria2 can't hop proxies mid-download the way this app's own speed-
+# based rotation does.
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg supervisor aria2 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt requirements-webui.txt ./

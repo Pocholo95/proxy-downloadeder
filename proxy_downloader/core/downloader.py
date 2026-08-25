@@ -13,6 +13,7 @@ from rich.progress import Progress, BarColumn, DownloadColumn, TransferSpeedColu
 from ..config import TIMEOUT, PERMANENT_FAIL, MIN_SPEED_KB
 from ..ui import console
 from ..utils import sanitize_filename, filename_from_header, sha256_file
+from . import aria2
 from .base import FileUnavailable, RateLimited
 
 
@@ -291,50 +292,38 @@ def download_direct(provider, file_id, output_dir, hint_name=None, progress_cb=N
             console.print(f"  [yellow]⚠  .part larger than expected — discarding[/yellow]")
             tmp.unlink(missing_ok=True)
             resume_from = 0
+        if resume_from > 0:
+            console.print(f"  [cyan]↻ Resuming from {resume_from/(1024*1024):.2f} MB[/cyan]")
 
-        if total_size > 0 and resume_from == total_size:
-            # Nothing left to fetch — a Range request starting exactly at EOF
-            # would just get a 416 from most servers. Skip straight to the
-            # size-check/postprocess/finalize step below with what's on disk.
-            console.print(f"  [cyan]↻ .part already fully downloaded, skipping fetch[/cyan]")
-        else:
-            dl_headers = headers.copy()
-            if resume_from > 0:
-                dl_headers["Range"] = f"bytes={resume_from}-"
-                console.print(f"  [cyan]↻ Resuming from {resume_from/(1024*1024):.2f} MB[/cyan]")
+        report("downloading", filename=fname, bytes_done=resume_from, total=total_size, speed_kb=0)
 
-            r = requests.get(url, headers=dl_headers, stream=True, timeout=TIMEOUT)
-            if r.status_code not in (200, 206):
-                console.print(f"  [red]✗ HTTP {r.status_code}[/red]")
-                return False, r.status_code
+        # aria2 does its own resume (via a .aria2 control file next to `tmp`)
+        # and multi-connection splitting -- no need to compute Range headers
+        # or stream chunks ourselves the way the proxy-rotation path still
+        # does (aria2 can't hop proxies mid-download the way that path can).
+        with Progress("[cyan]{task.description}[/cyan]", BarColumn(),
+                      DownloadColumn(), TransferSpeedColumn(), TimeRemainingColumn(),
+                      console=console) as bar:
+            task = bar.add_task(fname[:40], total=total_size or None, completed=resume_from)
+            known_total = [total_size]
 
-            bytes_dl = resume_from
-            last_report_time = 0.0
-            last_check_time  = time.time()
-            last_check_bytes = resume_from
-            report("downloading", filename=fname, bytes_done=bytes_dl, total=total_size, speed_kb=0)
+            def on_progress(done, total, speed_kb):
+                if total and not known_total[0]:
+                    known_total[0] = total
+                    bar.update(task, total=total)
+                bar.update(task, completed=done)
+                report("downloading", filename=fname, bytes_done=done,
+                       total=known_total[0], speed_kb=speed_kb)
 
-            with Progress("[cyan]{task.description}[/cyan]", BarColumn(),
-                          DownloadColumn(), TransferSpeedColumn(), TimeRemainingColumn(),
-                          console=console) as bar:
-                task = bar.add_task(fname[:40], total=total_size, completed=resume_from)
-                write_mode = "ab" if resume_from > 0 else "wb"
-                with open(tmp, write_mode) as f:
-                    for chunk in r.iter_content(chunk_size=262144):
-                        if cancel_event is not None and cancel_event.is_set():
-                            raise Cancelled()
-                        if chunk:
-                            f.write(chunk)
-                            bar.advance(task, len(chunk))
-                            bytes_dl += len(chunk)
+            status, msg = aria2.fetch(url, tmp, headers=headers, on_progress=on_progress,
+                                       cancel_event=cancel_event)
 
-                            now = time.time()
-                            if now - last_report_time >= 1:
-                                inst_speed = ((bytes_dl - last_check_bytes) / 1024) / max(now - last_check_time, 0.001)
-                                report("downloading", filename=fname, bytes_done=bytes_dl,
-                                       total=total_size, speed_kb=inst_speed)
-                                last_report_time = last_check_time = now
-                                last_check_bytes = bytes_dl
+        if status == "cancelled":
+            raise Cancelled()
+        if status != "done":
+            console.print(f"  [red]✗ aria2: {msg}[/red]")
+            report("failed", message=msg or "aria2 download failed")
+            return False, None
 
         final = tmp.stat().st_size
         if total_size > 0 and final != total_size:

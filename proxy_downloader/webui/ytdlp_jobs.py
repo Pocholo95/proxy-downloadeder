@@ -327,8 +327,15 @@ class YtdlpManager:
                     fname = d.get("filename")
                     if fname:
                         job.filename = Path(fname).name
-                    if job.total:
-                        job.bytes_done = job.total
+                    # With the aria2c external downloader (see below), this
+                    # "finished" event is the *only* progress_hooks call for
+                    # the whole download -- no earlier "downloading" ticks
+                    # set job.total, so it has to be read from this event
+                    # directly, not assumed to already be there.
+                    total = d.get("total_bytes") or d.get("total_bytes_estimate") or job.total
+                    if total:
+                        job.total = total
+                        job.bytes_done = d.get("downloaded_bytes") or total
             now = time.time()
             if now - last_persist[0] > 1:
                 last_persist[0] = now
@@ -346,6 +353,17 @@ class YtdlpManager:
         if proxy_url:
             ydl_opts["proxy"] = proxy_url
             job._append_log(f"Usando proxy: {proxy_url}")
+        else:
+            # aria2c can't hop proxies mid-download, so it's only wired in
+            # for the no-proxy path -- same reasoning as core/downloader.py's
+            # download_direct. Trade-off: yt-dlp's aria2c bridge only fires
+            # progress_hooks once at the end ("finished"), not live per-
+            # second updates like its own native downloader, so the job's
+            # progress bar jumps straight to 100% instead of climbing.
+            ydl_opts["external_downloader"] = "aria2c"
+            ydl_opts["external_downloader_args"] = {"aria2c": [
+                "-x4", "-s4", "-k1M", "--summary-interval=1", "--console-log-level=warn",
+            ]}
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:

@@ -19,14 +19,12 @@ import uuid
 from collections import deque
 from pathlib import Path
 
-import requests
-
+from ..core import aria2
 from . import video_optimize
 
 TERMINAL_STATUSES = {"done", "done_with_errors", "error", "cancelled"}
 INFLIGHT_STATUSES = {"queued", "downloading"}
 MAX_HISTORY = 100
-DOWNLOAD_CHUNK = 256 * 1024
 _HLS_DASH_EXTS = (".m3u8", ".mpd")
 
 
@@ -288,38 +286,29 @@ class ExtensionJobManager:
             return self._download_via_ffmpeg(job, item, url, headers, dest)
 
         tmp = dest.with_suffix(dest.suffix + ".part")
-        with requests.get(url, headers=headers, stream=True, timeout=30) as r:
-            r.raise_for_status()
-            total = int(r.headers.get("Content-Length") or item.get("total") or 0)
+
+        def on_progress(done, total, speed_kb):
             with job.lock:
-                item["total"] = total or item["total"]
-            done = 0
-            speed_started = time.time()
-            speed_bytes_at_start = 0
-            with open(tmp, "wb") as f:
-                for chunk in r.iter_content(chunk_size=DOWNLOAD_CHUNK):
-                    if job.cancel_event.is_set():
-                        raise RuntimeError("Cancelado")
-                    if not chunk:
-                        continue
-                    f.write(chunk)
-                    done += len(chunk)
-                    elapsed = time.time() - speed_started
-                    with job.lock:
-                        item["bytes_done"] = done
-                        if elapsed > 0:
-                            item["speed_kb"] = (done - speed_bytes_at_start) / elapsed / 1024
-                    now = time.time()
-                    if now - last_persist[0] > 1:
-                        last_persist[0] = now
-                        self._persist()
-        # requests.iter_content() can end its generator early on a dropped/
-        # truncated connection without ever raising -- the loop above would
-        # otherwise finish "normally" with a partial file and nothing to
-        # catch it, silently reporting success on a corrupt download.
-        if total and done != total:
-            tmp.unlink(missing_ok=True)
-            raise RuntimeError(f"Descarga incompleta: se recibieron {done} de {total} bytes esperados")
+                item["bytes_done"] = done
+                if total:
+                    item["total"] = total
+                item["speed_kb"] = speed_kb
+            now = time.time()
+            if now - last_persist[0] > 1:
+                last_persist[0] = now
+                self._persist()
+
+        # This endpoint never uses a proxy (the userscript sends the URL
+        # your own real browser already loaded it from), so it's always a
+        # candidate for aria2's resumable, multi-connection fetch -- same
+        # engine as the no-proxy SiteProvider path in core/downloader.py.
+        status, msg = aria2.fetch(url, tmp, headers=headers, on_progress=on_progress,
+                                   cancel_event=job.cancel_event)
+        if status == "cancelled":
+            raise RuntimeError("Cancelado")
+        if status != "done":
+            raise RuntimeError(msg or "aria2: fallo desconocido")
+
         tmp.replace(dest)
         return dest
 
