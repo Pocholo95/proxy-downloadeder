@@ -172,6 +172,35 @@ class SniffManager:
         self._queue.put(job_id)
         return job
 
+    def create_direct_job(self, page_url, url, headers=None, filename=None, output_dir=None):
+        """For a candidate found outside sniffer.py entirely — e.g. the
+        userscript in extras/violentmonkey/, which watches network traffic
+        in the user's own real browser instead of a headless one here, so
+        the "sniffing" already happened by the time this is called. Skips
+        straight to "queued_download" with the one item already chosen,
+        no candidate-picker step (the human already picked it by clicking
+        "download" on that specific video in the real page)."""
+        page_url = (page_url or "").strip()
+        url = (url or "").strip()
+        if not url:
+            raise ValueError("Falta la URL del video")
+        out_dir = Path(output_dir).expanduser() if output_dir else self.base_output_dir
+        job_id = uuid.uuid4().hex[:12]
+        job = SniffJob(job_id, page_url or url, str(out_dir))
+        job.status = "queued_download"
+        job.items = [{
+            "candidate_id": None, "url": url, "headers": dict(headers or {}),
+            "filename": filename or _filename_from_url(url, f"{job_id}.mp4"),
+            "status": "queued", "bytes_done": 0, "total": 0,
+            "speed_kb": 0, "message": None, "path": None,
+        }]
+        with self._meta_lock:
+            self.jobs[job_id] = job
+            self.order.append(job_id)
+        self._persist()
+        self._queue.put(job_id)
+        return job
+
     def get(self, job_id):
         return self.jobs.get(job_id)
 

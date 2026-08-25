@@ -503,6 +503,33 @@ def api_clear_finished_sniff():
     return jsonify({"ok": True, "removed": removed})
 
 
+_EXTENSION_HEADER_ALLOWLIST = {"referer", "origin", "user-agent", "cookie"}
+
+
+@app.post("/api/extension/download")
+def api_extension_download():
+    """For extras/violentmonkey/video-catcher.user.js — the browser-side
+    equivalent of sniffer.py's candidate detection, run in the user's own
+    real browser instead of a headless one here, so there's no "sniffing"
+    phase to run server-side: this goes straight to downloading the one
+    candidate the user picked. No auth (same trust model as the rest of
+    this app — Tailscale/LAN only), but headers are still filtered server-
+    side to the same small allowlist sniffer.py itself captures, regardless
+    of what the client sends, since this is the one endpoint here that
+    takes a client-supplied header dict at all."""
+    data = request.get_json(silent=True) or {}
+    raw_headers = data.get("headers") or {}
+    headers = {k: v for k, v in raw_headers.items() if k.lower() in _EXTENSION_HEADER_ALLOWLIST}
+    try:
+        job = sniff_manager.create_direct_job(
+            data.get("page_url", ""), data.get("url", ""),
+            headers=headers, filename=data.get("filename") or None,
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify(job.to_dict()), 201
+
+
 def main():
     port = int(os.environ.get("PORT", "8080"))
     app.run(host="0.0.0.0", port=port)

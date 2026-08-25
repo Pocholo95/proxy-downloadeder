@@ -324,6 +324,40 @@ historial ("Videos detectados", `state/sniff.json`) sigue el mismo
 patrón que el resto: progreso en vivo, log, cancelar, borrar, auto-
 optimize de faststart al terminar.
 
+#### Userscript (Violentmonkey/Tampermonkey) — sin heurística, para sitios difíciles
+
+Para cuando ni el click heurístico de arriba encuentra el video (players
+raros, contenido detrás de varias interacciones): en vez de que un
+navegador headless *adivine* dónde clickear, `extras/violentmonkey/
+video-catcher.user.js` corre en **tu propio navegador real** mientras
+mirás el video de forma completamente normal — sin heurística porque el
+que hace click sos vos. Detecta por dos vías (cualquier `fetch`/XHR que
+la página dispare, y cualquier `<video>` que aparezca en el DOM, incluso
+adentro de iframes de otro origen — Violentmonkey inyecta el script en
+cada frame por separado, así que no hace falta ir a buscarlo a mano como
+sí tiene que hacer el sniffer de la pestaña anterior) y, con un botón
+flotante, manda la URL + `Referer`/`Origin`/`User-Agent` que se usaron de
+verdad a un endpoint nuevo (`POST /api/extension/download`) que descarga
+directo, sin pasar por la pantalla de elegir candidatos — ya elegiste
+vos, en la página, cuál video era.
+
+Instalación: instalá [Violentmonkey](https://violentmonkey.github.io/) (o
+Tampermonkey) en tu navegador, abrí
+`extras/violentmonkey/video-catcher.user.js` desde este repo y confirmá
+la instalación. Después, desde el menú de Violentmonkey en cualquier
+página, **"⚙️ Configurar servidor"** una sola vez con la URL de tu
+Proxy Downloader (tu hostname de Tailscale o `IP:puerto`). De ahí en más,
+en cualquier página con video aparece un botón flotante abajo a la
+derecha con la cantidad detectada — click, elegís cuál (o "todos"), listo.
+
+No manda cookies (`document.cookie` no ve las `HttpOnly` de todos modos,
+y ningún sitio verificado hasta ahora las necesitó — si alguno las
+pidiera, se pueden sumar a mano en `sendToDownloader()` del script). Sin
+auth en el endpoint, igual que el resto de la app — pero los headers que
+manda el cliente se filtran igual del lado del servidor a la misma
+lista chica (`Referer`/`Origin`/`User-Agent`/`Cookie`), nunca se reenvía
+lo que sea que venga.
+
 ### Subir archivos
 
 Es la tercera pestaña de "Nueva descarga" (junto a "Archivo / Carpeta" y
@@ -456,8 +490,9 @@ La API REST que usa el frontend (`GET/POST /api/jobs`, `GET /api/jobs/<id>`,
 `POST /api/ytdlp/clear-finished`, `GET/POST /api/sniff/jobs`,
 `GET /api/sniff/jobs/<id>`, `GET /api/sniff/jobs/<id>/log`,
 `POST /api/sniff/jobs/<id>/download`, `POST /api/sniff/jobs/<id>/cancel`,
-`DELETE /api/sniff/jobs/<id>`, `POST /api/sniff/clear-finished`) es la
-misma que consume la página — se puede scriptear igual.
+`DELETE /api/sniff/jobs/<id>`, `POST /api/sniff/clear-finished`,
+`POST /api/extension/download`) es la misma que consume la página — se
+puede scriptear igual.
 
 ## VidGrid (incluido en la misma imagen)
 
