@@ -320,10 +320,67 @@ class ExtensionJobManager:
         cmd = ["ffmpeg", "-y", "-nostdin"]
         if header_lines:
             cmd += ["-headers", header_lines]
-        cmd += ["-i", url, "-c", "copy", str(dest)]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+        # -progress pipe:1 makes ffmpeg emit machine-readable key=value
+        # progress lines (total_size=..., speed=...) on stdout instead of
+        # its normal human-readable stats on stderr -- lets this report
+        # live bytes_done the same way the aria2 path above does, and
+        # having a real subprocess handle (Popen, not run()) is what makes
+        # cancellation possible at all: a plain subprocess.run() call blocks
+        # until ffmpeg finishes on its own with no way to interrupt it, so
+        # "cancel" used to just set a flag nothing ever checked while the
+        # download kept growing on disk regardless.
+        cmd += ["-i", url, "-c", "copy", "-progress", "pipe:1", "-nostats", str(dest)]
+
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                 text=True, bufsize=1)
+        stderr_tail = deque(maxlen=15)
+
+        def read_stderr():
+            for line in proc.stderr:
+                line = line.rstrip("\n")
+                if line:
+                    stderr_tail.append(line)
+        stderr_thread = threading.Thread(target=read_stderr, daemon=True)
+        stderr_thread.start()
+
+        last_persist_local = [0.0]
+        last_size, last_time = 0, time.time()
+        try:
+            for line in proc.stdout:
+                if job.cancel_event.is_set():
+                    proc.terminate()
+                    break
+                line = line.strip()
+                if line.startswith("total_size="):
+                    try:
+                        size = int(line.split("=", 1)[1])
+                    except ValueError:
+                        continue
+                    now = time.time()
+                    elapsed = now - last_time
+                    speed_kb = ((size - last_size) / 1024 / elapsed) if elapsed > 0 else 0
+                    with job.lock:
+                        item["bytes_done"] = size
+                        item["speed_kb"] = speed_kb
+                    last_size, last_time = size, now
+                    if now - last_persist_local[0] > 1:
+                        last_persist_local[0] = now
+                        self._persist()
+        finally:
+            try:
+                proc.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+            stderr_thread.join(timeout=2)
+
+        if job.cancel_event.is_set():
+            dest.unlink(missing_ok=True)
+            raise RuntimeError("Cancelado")
         if proc.returncode != 0:
-            raise RuntimeError(f"ffmpeg: {(proc.stderr or '').strip()[-500:]}")
+            dest.unlink(missing_ok=True)
+            raise RuntimeError(f"ffmpeg: {' | '.join(stderr_tail)[-500:]}")
+
         with job.lock:
             item["total"] = dest.stat().st_size
             item["bytes_done"] = item["total"]
