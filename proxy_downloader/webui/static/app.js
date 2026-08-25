@@ -136,9 +136,33 @@ const STATUS_LABELS = {
   downloading: "descargando",
 };
 
+const ENGINE_LABELS = { aria2: "⚡ aria2", ffmpeg: "🎞 ffmpeg", requests: "requests", "yt-dlp": "yt-dlp nativo" };
+function engineLabel(engine) {
+  return engine ? ENGINE_LABELS[engine] || engine : "";
+}
+
 const CANCELLABLE_STATUSES = new Set(["queued", "resolving", "fetching_proxies", "running"]);
 const RETRYABLE_STATUSES = new Set(["done_with_errors", "error", "cancelled"]);
 const DELETABLE_STATUSES = new Set(["done", "done_with_errors", "error", "cancelled"]);
+
+// The various refresh*() functions below poll every 1.5-2s and used to
+// replace a whole list's innerHTML every single tick regardless of whether
+// anything in it actually changed -- which wiped out any text selection
+// inside it and caused a visible flicker even while the app sat idle.
+// This skips the DOM rebuild (and the listener rebinding that goes with
+// it) whenever the freshly-rendered HTML is byte-identical to what's
+// already on screen, keyed per list so one actively-progressing download
+// doesn't force unrelated, unchanged lists to redraw too. A card that's
+// genuinely mid-download still redraws each tick, since its own numbers
+// are genuinely changing -- there's no getting around that without a much
+// heavier per-field DOM diff.
+const _lastListHTML = new Map();
+function updateListHTML(el, key, html) {
+  if (_lastListHTML.get(key) === html) return false;
+  _lastListHTML.set(key, html);
+  el.innerHTML = html;
+  return true;
+}
 
 async function fetchJSON(url, opts) {
   const r = await fetch(url, opts);
@@ -335,7 +359,7 @@ function itemProgress(item) {
       <span class="item-name">${item.filename || item.file_id} <span class="dim">(${item.site})</span></span>
       <span class="badge ${item.status}">${STATUS_LABELS[item.status] || item.status}</span>
     </div>
-    <div class="item-sub">${item.mode === "proxy" ? "vía proxy" : "directo"} ${sizeLabel ? "· " + sizeLabel : ""} ${speed ? "· " + speed : ""} ${item.message ? "· " + item.message : ""}</div>
+    <div class="item-sub">${item.mode === "proxy" ? "vía proxy" : "directo"} ${engineLabel(item.engine) ? "· " + engineLabel(item.engine) : ""} ${sizeLabel ? "· " + sizeLabel : ""} ${speed ? "· " + speed : ""} ${item.message ? "· " + item.message : ""}</div>
     <div class="progress-bar"><div class="progress-fill ${fillClass}" style="width:${pct}%"></div></div>
   </div>`;
 }
@@ -367,42 +391,41 @@ function jobCard(job) {
 async function refreshJobs() {
   try {
     const jobs = await fetchJSON("/api/jobs");
-    els.jobsList.innerHTML = jobs.length
-      ? jobs.map(jobCard).join("")
-      : `<p class="dim">Sin trabajos todavía.</p>`;
-
-    els.jobsList.querySelectorAll("button[data-cancel]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        btn.disabled = true;
-        await fetch(`/api/jobs/${btn.dataset.cancel}/cancel`, { method: "POST" });
-        refreshJobs();
+    const html = jobs.length ? jobs.map(jobCard).join("") : `<p class="dim">Sin trabajos todavía.</p>`;
+    if (updateListHTML(els.jobsList, "jobs", html)) {
+      els.jobsList.querySelectorAll("button[data-cancel]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          btn.disabled = true;
+          await fetch(`/api/jobs/${btn.dataset.cancel}/cancel`, { method: "POST" });
+          refreshJobs();
+        });
       });
-    });
-    els.jobsList.querySelectorAll("button[data-retry]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        try {
-          await fetchJSON(`/api/jobs/${btn.dataset.retry}/retry`, { method: "POST" });
-        } catch (err) {
-          alert(err.message);
-        }
-        refreshJobs();
+      els.jobsList.querySelectorAll("button[data-retry]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          try {
+            await fetchJSON(`/api/jobs/${btn.dataset.retry}/retry`, { method: "POST" });
+          } catch (err) {
+            alert(err.message);
+          }
+          refreshJobs();
+        });
       });
-    });
-    els.jobsList.querySelectorAll("button[data-delete-job]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        if (!confirm("¿Borrar este trabajo del historial? No afecta los archivos ya descargados.")) return;
-        await fetch(`/api/jobs/${btn.dataset.deleteJob}`, { method: "DELETE" });
-        refreshJobs();
+      els.jobsList.querySelectorAll("button[data-delete-job]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          if (!confirm("¿Borrar este trabajo del historial? No afecta los archivos ya descargados.")) return;
+          await fetch(`/api/jobs/${btn.dataset.deleteJob}`, { method: "DELETE" });
+          refreshJobs();
+        });
       });
-    });
-    els.jobsList.querySelectorAll("button[data-toggle-log]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const id = btn.dataset.toggleLog;
-        if (state.openLogs.has(id)) state.openLogs.delete(id);
-        else state.openLogs.add(id);
-        refreshJobs();
+      els.jobsList.querySelectorAll("button[data-toggle-log]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const id = btn.dataset.toggleLog;
+          if (state.openLogs.has(id)) state.openLogs.delete(id);
+          else state.openLogs.add(id);
+          refreshJobs();
+        });
       });
-    });
+    }
     for (const id of state.openLogs) {
       const pre = document.getElementById(`log-${id}`);
       if (!pre) continue;
@@ -433,7 +456,7 @@ function renderBreadcrumb() {
     acc = joinPath(acc, part);
     crumbs.push(`<span class="sep">/</span><button data-path="${acc}">${part}</button>`);
   }
-  els.filesBreadcrumb.innerHTML = crumbs.join("");
+  if (!updateListHTML(els.filesBreadcrumb, "breadcrumb", crumbs.join(""))) return;
   els.filesBreadcrumb.querySelectorAll("button[data-path]").forEach((btn) => {
     btn.addEventListener("click", () => loadFiles(btn.dataset.path));
   });
@@ -472,12 +495,13 @@ async function loadFiles(path) {
     const data = await fetchJSON(`/api/files?path=${encodeURIComponent(path || "")}`);
     state.filesPath = data.path;
     renderBreadcrumb();
-    els.filesList.innerHTML = data.entries.length
+    const html = data.entries.length
       ? `<table>
           <thead><tr><th>Nombre</th><th>Tamaño</th><th>Modificado</th><th></th></tr></thead>
           <tbody>${data.entries.map(fileRow).join("")}</tbody>
         </table>`
       : `<p class="dim">Vacío.</p>`;
+    if (!updateListHTML(els.filesList, "files:" + state.filesPath, html)) return;
 
     els.filesList.querySelectorAll("button[data-open]").forEach((btn) => {
       btn.addEventListener("click", () => loadFiles(btn.dataset.open));
@@ -883,9 +907,8 @@ function uploadJobCard(job) {
 async function refreshUploadJobs() {
   try {
     const jobs = await fetchJSON("/api/uploads/jobs");
-    els.uploadJobsList.innerHTML = jobs.length
-      ? jobs.map(uploadJobCard).join("")
-      : `<p class="dim">Sin subidas todavía.</p>`;
+    const html = jobs.length ? jobs.map(uploadJobCard).join("") : `<p class="dim">Sin subidas todavía.</p>`;
+    if (!updateListHTML(els.uploadJobsList, "uploads", html)) return;
     els.uploadJobsList.querySelectorAll("button[data-delete-upload]").forEach((btn) => {
       btn.addEventListener("click", async () => {
         await fetch(`/api/uploads/jobs/${btn.dataset.deleteUpload}`, { method: "DELETE" });
@@ -931,7 +954,7 @@ function videoJobCard(job) {
     <div class="job-head">
       <div>
         <div class="job-title">${title.length > 90 ? title.slice(0, 90) + "…" : title}</div>
-        <div class="job-meta">${created} · salida: ${job.output_dir}${job.error ? " · " + job.error : ""}</div>
+        <div class="job-meta">${created} · salida: ${job.output_dir}${engineLabel(job.engine) ? " · " + engineLabel(job.engine) : ""}${job.error ? " · " + job.error : ""}</div>
       </div>
       <span class="badge ${job.status}">${STATUS_LABELS[job.status] || job.status}</span>
     </div>
@@ -951,32 +974,31 @@ function videoJobCard(job) {
 async function refreshVideoJobs() {
   try {
     const jobs = await fetchJSON("/api/ytdlp/jobs");
-    els.videoJobsList.innerHTML = jobs.length
-      ? jobs.map(videoJobCard).join("")
-      : `<p class="dim">Sin videos todavía.</p>`;
-
-    els.videoJobsList.querySelectorAll("button[data-video-cancel]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        btn.disabled = true;
-        await fetch(`/api/ytdlp/jobs/${btn.dataset.videoCancel}/cancel`, { method: "POST" });
-        refreshVideoJobs();
+    const html = jobs.length ? jobs.map(videoJobCard).join("") : `<p class="dim">Sin videos todavía.</p>`;
+    if (updateListHTML(els.videoJobsList, "videos", html)) {
+      els.videoJobsList.querySelectorAll("button[data-video-cancel]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          btn.disabled = true;
+          await fetch(`/api/ytdlp/jobs/${btn.dataset.videoCancel}/cancel`, { method: "POST" });
+          refreshVideoJobs();
+        });
       });
-    });
-    els.videoJobsList.querySelectorAll("button[data-video-delete]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        if (!confirm("¿Borrar este video del historial? No afecta el archivo ya descargado.")) return;
-        await fetch(`/api/ytdlp/jobs/${btn.dataset.videoDelete}`, { method: "DELETE" });
-        refreshVideoJobs();
+      els.videoJobsList.querySelectorAll("button[data-video-delete]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          if (!confirm("¿Borrar este video del historial? No afecta el archivo ya descargado.")) return;
+          await fetch(`/api/ytdlp/jobs/${btn.dataset.videoDelete}`, { method: "DELETE" });
+          refreshVideoJobs();
+        });
       });
-    });
-    els.videoJobsList.querySelectorAll("button[data-video-toggle-log]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const id = btn.dataset.videoToggleLog;
-        if (state.openVideoLogs.has(id)) state.openVideoLogs.delete(id);
-        else state.openVideoLogs.add(id);
-        refreshVideoJobs();
+      els.videoJobsList.querySelectorAll("button[data-video-toggle-log]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const id = btn.dataset.videoToggleLog;
+          if (state.openVideoLogs.has(id)) state.openVideoLogs.delete(id);
+          else state.openVideoLogs.add(id);
+          refreshVideoJobs();
+        });
       });
-    });
+    }
     for (const id of state.openVideoLogs) {
       const pre = document.getElementById(`video-log-${id}`);
       if (!pre) continue;
@@ -1010,7 +1032,7 @@ function extensionItemProgress(item) {
       <span class="item-name">${item.filename}</span>
       <span class="badge ${item.status}">${STATUS_LABELS[item.status] || item.status}</span>
     </div>
-    <div class="item-sub">${sizeLabel ? sizeLabel : ""} ${speed ? "· " + speed : ""} ${item.message ? "· " + item.message : ""}</div>
+    <div class="item-sub">${engineLabel(item.engine)} ${sizeLabel ? "· " + sizeLabel : ""} ${speed ? "· " + speed : ""} ${item.message ? "· " + item.message : ""}</div>
     <div class="progress-bar"><div class="progress-fill ${fillClass}" style="width:${pct}%"></div></div>
   </div>`;
 }
@@ -1043,36 +1065,35 @@ function extensionJobCard(job) {
 async function refreshExtensionJobs() {
   try {
     const jobs = await fetchJSON("/api/extension/jobs");
-    els.extensionJobsList.innerHTML = jobs.length
-      ? jobs.map(extensionJobCard).join("")
-      : `<p class="dim">Sin videos todavía.</p>`;
-
-    els.extensionJobsList.querySelectorAll("button[data-extension-cancel]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        btn.disabled = true;
-        await fetch(`/api/extension/jobs/${btn.dataset.extensionCancel}/cancel`, { method: "POST" });
-        refreshExtensionJobs();
-      });
-    });
-    els.extensionJobsList.querySelectorAll("button[data-extension-delete]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        if (!confirm("¿Borrar este video del historial? No afecta los archivos ya descargados.")) return;
-        try {
-          await fetchJSON(`/api/extension/jobs/${btn.dataset.extensionDelete}`, { method: "DELETE" });
+    const html = jobs.length ? jobs.map(extensionJobCard).join("") : `<p class="dim">Sin videos todavía.</p>`;
+    if (updateListHTML(els.extensionJobsList, "extension", html)) {
+      els.extensionJobsList.querySelectorAll("button[data-extension-cancel]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          btn.disabled = true;
+          await fetch(`/api/extension/jobs/${btn.dataset.extensionCancel}/cancel`, { method: "POST" });
           refreshExtensionJobs();
-        } catch (err) {
-          alert(err.message);
-        }
+        });
       });
-    });
-    els.extensionJobsList.querySelectorAll("button[data-extension-toggle-log]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const key = `extension-${btn.dataset.extensionToggleLog}`;
-        if (state.openLogs.has(key)) state.openLogs.delete(key);
-        else state.openLogs.add(key);
-        refreshExtensionJobs();
+      els.extensionJobsList.querySelectorAll("button[data-extension-delete]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          if (!confirm("¿Borrar este video del historial? No afecta los archivos ya descargados.")) return;
+          try {
+            await fetchJSON(`/api/extension/jobs/${btn.dataset.extensionDelete}`, { method: "DELETE" });
+            refreshExtensionJobs();
+          } catch (err) {
+            alert(err.message);
+          }
+        });
       });
-    });
+      els.extensionJobsList.querySelectorAll("button[data-extension-toggle-log]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const key = `extension-${btn.dataset.extensionToggleLog}`;
+          if (state.openLogs.has(key)) state.openLogs.delete(key);
+          else state.openLogs.add(key);
+          refreshExtensionJobs();
+        });
+      });
+    }
     for (const job of jobs) {
       const key = `extension-${job.id}`;
       if (!state.openLogs.has(key)) continue;

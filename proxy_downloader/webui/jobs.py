@@ -429,6 +429,10 @@ class JobManager:
                 with job.lock:
                     item["status"] = "running"
                     item["mode"] = "proxy" if wants_proxy else "direct"
+                    # aria2 has no way to hop proxies mid-download, so the
+                    # proxy-rotation path stays on plain `requests` (see
+                    # core/downloader.py); only the no-proxy path gets aria2.
+                    item["engine"] = "requests" if use_proxy else "aria2"
                 self._persist()
 
                 cb = self._make_progress_cb(job, item)
@@ -518,6 +522,7 @@ class JobManager:
             "dest_dir": str(dest_dir),
             "status": "queued",
             "mode": "proxy" if wants_proxy else "direct",
+            "engine": "requests" if wants_proxy else "aria2",
             "phase": None,
             "bytes_done": 0,
             "total": 0,

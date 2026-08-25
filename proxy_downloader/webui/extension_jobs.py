@@ -192,11 +192,15 @@ class ExtensionJobManager:
         out_dir = Path(output_dir).expanduser() if output_dir else self.base_output_dir
         job_id = uuid.uuid4().hex[:12]
         job = ExtensionJob(job_id, page_url or url, str(out_dir))
+        # aria2 can't remux an HLS/DASH manifest itself, so those go through
+        # ffmpeg instead -- known up front from the URL alone, no need to
+        # wait until the download actually starts to show which one it'll be.
+        engine = "ffmpeg" if url.split("?")[0].lower().endswith(_HLS_DASH_EXTS) else "aria2"
         job.items = [{
             "url": url, "headers": dict(headers or {}),
             "filename": filename or _pick_filename(url, page_title, f"{job_id}.mp4"),
             "status": "queued", "bytes_done": 0, "total": 0,
-            "speed_kb": 0, "message": None, "path": None,
+            "speed_kb": 0, "message": None, "path": None, "engine": engine,
         }]
         with self._meta_lock:
             self.jobs[job_id] = job

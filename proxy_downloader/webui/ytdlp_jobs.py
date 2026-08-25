@@ -60,6 +60,7 @@ class YtdlpJob:
         self.proxy_mode = proxy_mode  # "auto" | "proxy" | "no-proxy" — "auto" behaves like "no-proxy"
         self.status = "queued"  # queued|running|cancelling|done|error|cancelled
         self.error = None
+        self.engine = None  # "aria2" | "yt-dlp" -- set once the run actually starts
         self.title = None
         self.filename = None
         self.bytes_done = 0
@@ -86,6 +87,7 @@ class YtdlpJob:
                 "proxy_mode": self.proxy_mode,
                 "status": self.status,
                 "error": self.error,
+                "engine": self.engine,
                 "title": self.title,
                 "filename": self.filename,
                 "bytes_done": self.bytes_done,
@@ -106,6 +108,7 @@ class YtdlpJob:
         job = cls(d["id"], d["url"], d["output_dir"], d.get("proxy_mode", "auto"))
         job.status = d.get("status", "error")
         job.error = d.get("error")
+        job.engine = d.get("engine")
         job.title = d.get("title")
         job.filename = d.get("filename")
         job.bytes_done = d.get("bytes_done", 0)
@@ -353,7 +356,9 @@ class YtdlpManager:
         if proxy_url:
             ydl_opts["proxy"] = proxy_url
             job._append_log(f"Usando proxy: {proxy_url}")
+            job.engine = "yt-dlp"
         else:
+            job.engine = "aria2"
             # aria2c can't hop proxies mid-download, so it's only wired in
             # for the no-proxy path -- same reasoning as core/downloader.py's
             # download_direct. Trade-off: yt-dlp's aria2c bridge only fires
