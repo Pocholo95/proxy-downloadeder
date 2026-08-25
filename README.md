@@ -293,53 +293,24 @@ Tiene su propio historial ("Videos (yt-dlp)", persistido en
 Todo video que termine de bajar se optimiza para streaming igual que
 cualquier otra descarga (ver más abajo).
 
-### Video (detectar)
+### Video (extensión) — userscript de Violentmonkey/Tampermonkey
 
-Quinta pestaña: para páginas que ni yt-dlp (ni su extractor genérico)
-resuelve — sitios sin extractor específico donde el video real se arma
-por JS recién al reproducir, nunca aparece en el HTML plano. Es el mismo
-truco que usa la extensión **Video DownloadHelper**: abre la página en un
-navegador headless (Playwright + Chromium), la deja cargar, intenta
-clickear un botón de play si encuentra uno (heurística por selectores
-comunes — Plyr, Video.js, JW Player, etc., adentro de la página y de
-cualquier iframe), y mira **toda la red** que pasó mientras tanto por
-cualquier cosa con pinta de video (`.mp4`, `.webm`, `.m3u8`, `.mpd`, ...).
-También guarda los headers (`Referer`, `Origin`, `User-Agent`, `Cookie`)
-que usó esa petición real — muchos CDN rechazan la descarga si no vienen,
-así que se reusan tal cual al bajar el archivo después.
-
-Pegás la URL de la **página** (no el link directo del video, ese ya lo
-tenés si lo tenías) y esperás ~10-15s — carga la página real, no es
-instantáneo. Cuando termina, se abre un diálogo con **todo lo que
-encontró, sin tildar nada por default**: elegís cuáles de esos querés
-(puede haber más de uno — el video real, algún preview, publicidad) y
-recién ahí arranca la descarga de los que tildaste.
-
-Es el último recurso, no el primero — yt-dlp (extractor específico o
-genérico) y los `SiteProvider` de `sites/` son más rápidos y confiables
-cuando aplican, así que probalos primero. Esto no tiene garantía de
-funcionar en cualquier sitio (players raros, contenido que solo carga
-tras varias interacciones, DRM) — es heurística, no magia. Su propio
-historial ("Videos detectados", `state/sniff.json`) sigue el mismo
-patrón que el resto: progreso en vivo, log, cancelar, borrar, auto-
-optimize de faststart al terminar.
-
-#### Userscript (Violentmonkey/Tampermonkey) — sin heurística, para sitios difíciles
-
-Para cuando ni el click heurístico de arriba encuentra el video (players
-raros, contenido detrás de varias interacciones): en vez de que un
-navegador headless *adivine* dónde clickear, `extras/violentmonkey/
+Para páginas que ni yt-dlp (ni su extractor genérico) resuelve — sitios
+sin extractor específico donde el video real se arma por JS recién al
+reproducir, nunca aparece en el HTML plano. Mismo problema que resuelve
+la extensión **Video DownloadHelper**, pero acá `extras/violentmonkey/
 video-catcher.user.js` corre en **tu propio navegador real** mientras
-mirás el video de forma completamente normal — sin heurística porque el
-que hace click sos vos. Detecta por dos vías (cualquier `fetch`/XHR que
-la página dispare, y cualquier `<video>` que aparezca en el DOM, incluso
-adentro de iframes de otro origen — Violentmonkey inyecta el script en
-cada frame por separado, así que no hace falta ir a buscarlo a mano como
-sí tiene que hacer el sniffer de la pestaña anterior) y, con un botón
+mirás el video de forma completamente normal — no hay heurística de click
+en un navegador headless adivinando dónde está el botón de play, porque
+el que hace click sos vos.
+
+Detecta por dos vías (cualquier `fetch`/XHR que la página dispare, y
+cualquier `<video>` que aparezca en el DOM, incluso adentro de iframes de
+otro origen — Violentmonkey inyecta el script en cada frame por separado,
+así que no hace falta ir a buscar el iframe a mano) y, con un botón
 flotante, manda la URL + `Referer`/`Origin`/`User-Agent` que se usaron de
-verdad a un endpoint nuevo (`POST /api/extension/download`) que descarga
-directo, sin pasar por la pantalla de elegir candidatos — ya elegiste
-vos, en la página, cuál video era.
+verdad a `POST /api/extension/download`, que descarga directo — ya
+elegiste vos, en la página, cuál video era.
 
 Instalación: instalá [Violentmonkey](https://violentmonkey.github.io/) (o
 Tampermonkey) en tu navegador, abrí
@@ -487,12 +458,11 @@ La API REST que usa el frontend (`GET/POST /api/jobs`, `GET /api/jobs/<id>`,
 `POST /api/uploads/clear-finished`, `GET/POST /api/ytdlp/jobs`,
 `GET /api/ytdlp/jobs/<id>`, `GET /api/ytdlp/jobs/<id>/log`,
 `POST /api/ytdlp/jobs/<id>/cancel`, `DELETE /api/ytdlp/jobs/<id>`,
-`POST /api/ytdlp/clear-finished`, `GET/POST /api/sniff/jobs`,
-`GET /api/sniff/jobs/<id>`, `GET /api/sniff/jobs/<id>/log`,
-`POST /api/sniff/jobs/<id>/download`, `POST /api/sniff/jobs/<id>/cancel`,
-`DELETE /api/sniff/jobs/<id>`, `POST /api/sniff/clear-finished`,
-`POST /api/extension/download`) es la misma que consume la página — se
-puede scriptear igual.
+`POST /api/ytdlp/clear-finished`, `POST /api/extension/download`,
+`GET /api/extension/jobs`, `GET /api/extension/jobs/<id>`,
+`GET /api/extension/jobs/<id>/log`, `POST /api/extension/jobs/<id>/cancel`,
+`DELETE /api/extension/jobs/<id>`, `POST /api/extension/clear-finished`)
+es la misma que consume la página — se puede scriptear igual.
 
 ## VidGrid (incluido en la misma imagen)
 

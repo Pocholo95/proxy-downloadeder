@@ -1,15 +1,15 @@
-"""Two-phase "Video (detectar)" job manager: paste a page URL (not a
-direct video link), a headless browser loads it and reports every video-
-looking resource it saw (sniffer.py) — then, once you've picked which of
-those you actually want, downloads them with the same headers (referer/
-origin/cookies/user-agent) the browser used, since plenty of sites'
-CDNs reject a request that doesn't carry them.
+"""Job manager for videos found by the Violentmonkey userscript
+(extras/violentmonkey/video-catcher.user.js) — that script watches
+network traffic in the user's own real browser and, once they pick which
+detected video they want, POSTs it to POST /api/extension/download. All
+the "detection" already happened client-side by the time this module ever
+sees a job, so there's no candidate-picker phase here at all — every job
+goes straight to downloading the one item the user already chose, with
+the Referer/Origin/User-Agent/Cookie headers their browser actually used,
+since plenty of CDNs reject a request that doesn't carry them.
 
 Same background-worker-thread shape as jobs.py/upload_jobs.py/
-ytdlp_jobs.py, but a single queue carries both phases: a job freshly
-created is "queued" (→ sniff it), and once the user confirms a selection
-it's re-queued as "queued_download" (→ download the chosen items) —
-the worker just checks which phase a job is in.
+ytdlp_jobs.py.
 """
 import json
 import threading
@@ -21,11 +21,10 @@ from pathlib import Path
 
 import requests
 
-from . import sniffer
 from . import video_optimize
 
-TERMINAL_STATUSES = {"done", "done_with_errors", "error", "cancelled", "no_candidates"}
-INFLIGHT_STATUSES = {"queued", "sniffing", "queued_download", "downloading"}
+TERMINAL_STATUSES = {"done", "done_with_errors", "error", "cancelled"}
+INFLIGHT_STATUSES = {"queued", "downloading"}
 MAX_HISTORY = 100
 DOWNLOAD_CHUNK = 256 * 1024
 _HLS_DASH_EXTS = (".m3u8", ".mpd")
@@ -37,15 +36,14 @@ def _filename_from_url(url, fallback):
     return name or fallback
 
 
-class SniffJob:
+class ExtensionJob:
     def __init__(self, job_id, page_url, output_dir):
         self.id = job_id
         self.page_url = page_url
         self.output_dir = output_dir
-        self.status = "queued"
+        self.status = "queued"  # queued|downloading|done|done_with_errors|error|cancelled
         self.error = None
-        self.candidates = []   # [{id, url, content_type, size, headers}]
-        self.items = []        # populated once a selection is confirmed
+        self.items = []  # [{url, headers, filename, status, bytes_done, total, speed_kb, message, path}]
         self.created_at = time.time()
         self.started_at = None
         self.finished_at = None
@@ -66,7 +64,6 @@ class SniffJob:
                 "output_dir": self.output_dir,
                 "status": self.status,
                 "error": self.error,
-                "candidates": list(self.candidates),
                 "items": [{k: v for k, v in it.items() if k != "headers"} for it in self.items],
                 "created_at": self.created_at,
                 "started_at": self.started_at,
@@ -83,7 +80,6 @@ class SniffJob:
         job = cls(d["id"], d["page_url"], d["output_dir"])
         job.status = d.get("status", "error")
         job.error = d.get("error")
-        job.candidates = d.get("candidates") or []
         job.items = d.get("items") or []
         job.created_at = d.get("created_at") or time.time()
         job.started_at = d.get("started_at")
@@ -96,12 +92,12 @@ class SniffJob:
         return "\n".join(self.log_lines)
 
 
-class SniffManager:
+class ExtensionJobManager:
     def __init__(self, base_output_dir, state_dir):
         self.base_output_dir = Path(base_output_dir)
         self.state_dir = Path(state_dir)
         self.state_dir.mkdir(parents=True, exist_ok=True)
-        self._jobs_file = self.state_dir / "sniff.json"
+        self._jobs_file = self.state_dir / "extension.json"
 
         self.jobs = {}
         self.order = []
@@ -109,7 +105,7 @@ class SniffManager:
         self._queue = queue.Queue()
 
         self._load_persisted()
-        self._worker = threading.Thread(target=self._worker_loop, daemon=True, name="sniff-worker")
+        self._worker = threading.Thread(target=self._worker_loop, daemon=True, name="extension-worker")
         self._worker.start()
 
     # ── persistence ──
@@ -122,7 +118,7 @@ class SniffManager:
             return
         for jd in payload:
             try:
-                job = SniffJob.from_dict(jd)
+                job = ExtensionJob.from_dict(jd)
             except Exception:
                 continue
             if job.status in INFLIGHT_STATUSES:
@@ -158,38 +154,16 @@ class SniffManager:
         self.order = keep
 
     # ── jobs ──
-    def create_job(self, page_url, output_dir=None):
-        page_url = (page_url or "").strip()
-        if not page_url:
-            raise ValueError("Falta la URL de la página")
-        out_dir = Path(output_dir).expanduser() if output_dir else self.base_output_dir
-        job_id = uuid.uuid4().hex[:12]
-        job = SniffJob(job_id, page_url, str(out_dir))
-        with self._meta_lock:
-            self.jobs[job_id] = job
-            self.order.append(job_id)
-        self._persist()
-        self._queue.put(job_id)
-        return job
-
-    def create_direct_job(self, page_url, url, headers=None, filename=None, output_dir=None):
-        """For a candidate found outside sniffer.py entirely — e.g. the
-        userscript in extras/violentmonkey/, which watches network traffic
-        in the user's own real browser instead of a headless one here, so
-        the "sniffing" already happened by the time this is called. Skips
-        straight to "queued_download" with the one item already chosen,
-        no candidate-picker step (the human already picked it by clicking
-        "download" on that specific video in the real page)."""
+    def create_job(self, page_url, url, headers=None, filename=None, output_dir=None):
         page_url = (page_url or "").strip()
         url = (url or "").strip()
         if not url:
             raise ValueError("Falta la URL del video")
         out_dir = Path(output_dir).expanduser() if output_dir else self.base_output_dir
         job_id = uuid.uuid4().hex[:12]
-        job = SniffJob(job_id, page_url or url, str(out_dir))
-        job.status = "queued_download"
+        job = ExtensionJob(job_id, page_url or url, str(out_dir))
         job.items = [{
-            "candidate_id": None, "url": url, "headers": dict(headers or {}),
+            "url": url, "headers": dict(headers or {}),
             "filename": filename or _filename_from_url(url, f"{job_id}.mp4"),
             "status": "queued", "bytes_done": 0, "total": 0,
             "speed_kb": 0, "message": None, "path": None,
@@ -209,36 +183,15 @@ class SniffManager:
             ids = list(reversed(self.order))
         return [self.jobs[i] for i in ids if i in self.jobs]
 
-    def confirm_download(self, job_id, candidate_ids):
-        job = self.jobs.get(job_id)
-        if not job:
-            raise ValueError("Job not found")
-        with job.lock:
-            if job.status != "ready":
-                raise ValueError("Este job no tiene candidatos listos para elegir")
-            chosen = [c for c in job.candidates if c["id"] in set(candidate_ids)]
-            if not chosen:
-                raise ValueError("No se eligió ningún video")
-            job.items = [{
-                "candidate_id": c["id"], "url": c["url"], "headers": c["headers"],
-                "filename": _filename_from_url(c["url"], f"{c['id']}.mp4"),
-                "status": "queued", "bytes_done": 0, "total": c.get("size") or 0,
-                "speed_kb": 0, "message": None, "path": None,
-            } for c in chosen]
-            job.status = "queued_download"
-        self._persist()
-        self._queue.put(job_id)
-        return job
-
     def cancel(self, job_id):
         job = self.jobs.get(job_id)
         if not job:
             return False
         with job.lock:
-            if job.status in ("queued", "queued_download"):
+            if job.status == "queued":
                 job.status = "cancelled"
                 job.finished_at = time.time()
-            elif job.status in ("sniffing", "downloading"):
+            elif job.status == "downloading":
                 job.cancel_event.set()
                 job.status = "cancelled"  # worker checks cancel_event and stops promptly
             else:
@@ -251,7 +204,7 @@ class SniffManager:
             job = self.jobs.get(job_id)
             if not job:
                 return False
-            if job.status not in TERMINAL_STATUSES and job.status != "ready":
+            if job.status not in TERMINAL_STATUSES:
                 raise ValueError("Esperá a que termine antes de borrarlo")
             del self.jobs[job_id]
             self.order.remove(job_id)
@@ -259,9 +212,8 @@ class SniffManager:
         return True
 
     def clear_finished(self):
-        finished = TERMINAL_STATUSES | {"ready"}
         with self._meta_lock:
-            to_remove = [jid for jid in self.order if jid in self.jobs and self.jobs[jid].status in finished]
+            to_remove = [jid for jid in self.order if jid in self.jobs and self.jobs[jid].status in TERMINAL_STATUSES]
             for jid in to_remove:
                 del self.jobs[jid]
             self.order = [jid for jid in self.order if jid not in to_remove]
@@ -276,14 +228,10 @@ class SniffManager:
             if not job:
                 continue
             with job.lock:
-                phase = job.status
-                if phase == "cancelled":
+                if job.status == "cancelled":
                     continue
             try:
-                if phase == "queued":
-                    self._run_sniff(job)
-                elif phase == "queued_download":
-                    self._run_download(job)
+                self._run_download(job)
             except Exception as e:
                 job._log(f"FATAL: {type(e).__name__}: {e}")
                 with job.lock:
@@ -291,34 +239,6 @@ class SniffManager:
                     job.error = str(e)
                     job.finished_at = time.time()
                 self._persist()
-
-    def _run_sniff(self, job):
-        with job.lock:
-            job.status = "sniffing"
-            job.started_at = time.time()
-        self._persist()
-        try:
-            found = sniffer.sniff_page(job.page_url)
-        except sniffer.SniffError as e:
-            with job.lock:
-                job.status = "error"
-                job.error = str(e)
-                job.finished_at = time.time()
-            self._persist()
-            return
-
-        with job.lock:
-            if job.cancel_event.is_set():
-                job.status = "cancelled"
-                job.finished_at = time.time()
-            elif not found:
-                job.status = "no_candidates"
-                job.error = "No se encontró ningún video en esa página"
-                job.finished_at = time.time()
-            else:
-                job.candidates = [{**c, "id": uuid.uuid4().hex[:8]} for c in found]
-                job.status = "ready"
-        self._persist()
 
     def _run_download(self, job):
         with job.lock:

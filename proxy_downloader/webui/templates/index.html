@@ -23,7 +23,6 @@
           <button type="button" class="tab active" data-kind="auto">Archivo / Carpeta</button>
           <button type="button" class="tab" data-kind="batch">Batch</button>
           <button type="button" class="tab" data-kind="video">Video (yt-dlp)</button>
-          <button type="button" class="tab" data-kind="sniff">Video (detectar)</button>
           <button type="button" class="tab" data-kind="upload">Subir</button>
         </div>
 
@@ -36,16 +35,6 @@
           <label for="value-video">URL del video (o playlist) — YouTube, Twitter/X, Instagram, TikTok, Reddit, Twitch y varios cientos más</label>
           <input type="text" id="value-video" placeholder="https://www.youtube.com/watch?v=XXXXXXXXXXX">
           <span class="field-hint">Motor aparte (yt-dlp): sin rotación de proxy, usa a lo sumo uno fijo para toda la descarga.</span>
-        </div>
-
-        <div class="field hidden" id="field-sniff">
-          <label for="value-sniff">URL de la página donde está el video (no el link directo del video)</label>
-          <input type="text" id="value-sniff" placeholder="https://algun-sitio.com/v/XXXXXXXX">
-          <span class="field-hint">
-            Para páginas sin extractor de yt-dlp: abre la página en un navegador headless y detecta
-            los videos reales que carga (como la extensión Video DownloadHelper). Más lento
-            (~10-15s) y no garantizado — probá primero con "Video (yt-dlp)".
-          </span>
         </div>
 
         <div class="field hidden" id="field-batch">
@@ -187,10 +176,10 @@ https://1fichier.com/?XXXXXXXXX"></textarea>
     </section>
 
     <section class="card">
-      <h2>Videos detectados
-        <button type="button" class="btn small" id="sniff-clear-finished">limpiar completados</button>
+      <h2>Videos (extensión)
+        <button type="button" class="btn small" id="extension-clear-finished">limpiar completados</button>
       </h2>
-      <div id="sniff-jobs-list"><p class="dim">Sin videos todavía.</p></div>
+      <div id="extension-jobs-list"><p class="dim">Sin videos todavía.</p></div>
     </section>
 
     <section class="card">
@@ -205,20 +194,6 @@ https://1fichier.com/?XXXXXXXXX"></textarea>
     <div class="preview-modal-inner">
       <button type="button" class="preview-close" id="preview-close">✕</button>
       <div id="preview-content"></div>
-    </div>
-  </div>
-
-  <div id="sniff-modal" class="preview-modal hidden">
-    <div class="preview-modal-inner sniff-modal-inner">
-      <button type="button" class="preview-close" id="sniff-modal-close">✕</button>
-      <div class="card">
-        <h2>Videos encontrados</h2>
-        <div id="sniff-candidates-list"></div>
-        <div class="job-actions">
-          <button type="button" class="btn primary" id="sniff-confirm-btn">Descargar seleccionados</button>
-          <button type="button" class="btn" id="sniff-cancel-btn">Cancelar</button>
-        </div>
-      </div>
     </div>
   </div>
 

@@ -17,7 +17,7 @@ from . import video_optimize
 from .jobs import JobManager
 from .upload_jobs import UploadManager
 from .ytdlp_jobs import YtdlpManager
-from .sniff_jobs import SniffManager
+from .extension_jobs import ExtensionJobManager
 
 OUTPUT_DIR = os.environ.get("DOWNLOAD_DIR", "/downloads")
 STATE_DIR = os.environ.get("STATE_DIR", "/app/state")
@@ -27,7 +27,7 @@ app = Flask(__name__)
 manager = JobManager(base_output_dir=OUTPUT_DIR, state_dir=STATE_DIR)
 upload_manager = UploadManager(state_dir=STATE_DIR, tmp_dir=UPLOAD_TMP_DIR)
 ytdlp_manager = YtdlpManager(base_output_dir=OUTPUT_DIR, state_dir=STATE_DIR)
-sniff_manager = SniffManager(base_output_dir=OUTPUT_DIR, state_dir=STATE_DIR)
+extension_manager = ExtensionJobManager(base_output_dir=OUTPUT_DIR, state_dir=STATE_DIR)
 
 
 @app.get("/")
@@ -437,59 +437,66 @@ def api_clear_finished_ytdlp():
     return jsonify({"ok": True, "removed": removed})
 
 
-@app.get("/api/sniff/jobs")
-def api_list_sniff_jobs():
-    return jsonify([j.to_dict() for j in sniff_manager.list_jobs()])
+_EXTENSION_HEADER_ALLOWLIST = {"referer", "origin", "user-agent", "cookie"}
 
 
-@app.post("/api/sniff/jobs")
-def api_create_sniff_job():
+@app.post("/api/extension/download")
+def api_extension_download():
+    """For extras/violentmonkey/video-catcher.user.js — it watches network
+    traffic in the user's own real browser and, once they pick a detected
+    video, posts it here. No "sniffing" happens server-side at all: this
+    goes straight to downloading the one candidate the user already
+    picked. No auth (same trust model as the rest of this app —
+    Tailscale/LAN only), but headers are still filtered server-side to a
+    small allowlist regardless of what the client sends, since this is
+    the one endpoint here that takes a client-supplied header dict at
+    all."""
     data = request.get_json(silent=True) or {}
+    raw_headers = data.get("headers") or {}
+    headers = {k: v for k, v in raw_headers.items() if k.lower() in _EXTENSION_HEADER_ALLOWLIST}
     try:
-        job = sniff_manager.create_job(data.get("url", ""), output_dir=data.get("output_dir") or None)
+        job = extension_manager.create_job(
+            data.get("page_url", ""), data.get("url", ""),
+            headers=headers, filename=data.get("filename") or None,
+        )
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     return jsonify(job.to_dict()), 201
 
 
-@app.get("/api/sniff/jobs/<job_id>")
-def api_get_sniff_job(job_id):
-    job = sniff_manager.get(job_id)
+@app.get("/api/extension/jobs")
+def api_list_extension_jobs():
+    return jsonify([j.to_dict() for j in extension_manager.list_jobs()])
+
+
+@app.get("/api/extension/jobs/<job_id>")
+def api_get_extension_job(job_id):
+    job = extension_manager.get(job_id)
     if not job:
         return jsonify({"error": "not found"}), 404
     return jsonify(job.to_dict())
 
 
-@app.get("/api/sniff/jobs/<job_id>/log")
-def api_get_sniff_job_log(job_id):
-    job = sniff_manager.get(job_id)
+@app.get("/api/extension/jobs/<job_id>/log")
+def api_get_extension_job_log(job_id):
+    job = extension_manager.get(job_id)
     if not job:
         return jsonify({"error": "not found"}), 404
     return job.log_text(), 200, {"Content-Type": "text/plain; charset=utf-8"}
 
 
-@app.post("/api/sniff/jobs/<job_id>/download")
-def api_confirm_sniff_download(job_id):
-    data = request.get_json(silent=True) or {}
-    try:
-        job = sniff_manager.confirm_download(job_id, data.get("candidate_ids") or [])
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-    return jsonify(job.to_dict())
-
-
-@app.post("/api/sniff/jobs/<job_id>/cancel")
-def api_cancel_sniff_job(job_id):
-    ok = sniff_manager.cancel(job_id)
+@app.post("/api/extension/jobs/<job_id>/cancel")
+def api_cancel_extension_job(job_id):
+    ok = extension_manager.cancel(job_id)
     if not ok:
         return jsonify({"error": "job not cancellable (already finished, or not found)"}), 409
     return jsonify({"ok": True})
 
 
-@app.delete("/api/sniff/jobs/<job_id>")
-def api_delete_sniff_job(job_id):
+@app.delete("/api/extension/jobs/<job_id>")
+def api_delete_extension_job(job_id):
     try:
-        ok = sniff_manager.delete_job(job_id)
+        ok = extension_manager.delete_job(job_id)
     except ValueError as e:
         return jsonify({"error": str(e)}), 409
     if not ok:
@@ -497,37 +504,10 @@ def api_delete_sniff_job(job_id):
     return jsonify({"ok": True})
 
 
-@app.post("/api/sniff/clear-finished")
-def api_clear_finished_sniff():
-    removed = sniff_manager.clear_finished()
+@app.post("/api/extension/clear-finished")
+def api_clear_finished_extension():
+    removed = extension_manager.clear_finished()
     return jsonify({"ok": True, "removed": removed})
-
-
-_EXTENSION_HEADER_ALLOWLIST = {"referer", "origin", "user-agent", "cookie"}
-
-
-@app.post("/api/extension/download")
-def api_extension_download():
-    """For extras/violentmonkey/video-catcher.user.js — the browser-side
-    equivalent of sniffer.py's candidate detection, run in the user's own
-    real browser instead of a headless one here, so there's no "sniffing"
-    phase to run server-side: this goes straight to downloading the one
-    candidate the user picked. No auth (same trust model as the rest of
-    this app — Tailscale/LAN only), but headers are still filtered server-
-    side to the same small allowlist sniffer.py itself captures, regardless
-    of what the client sends, since this is the one endpoint here that
-    takes a client-supplied header dict at all."""
-    data = request.get_json(silent=True) or {}
-    raw_headers = data.get("headers") or {}
-    headers = {k: v for k, v in raw_headers.items() if k.lower() in _EXTENSION_HEADER_ALLOWLIST}
-    try:
-        job = sniff_manager.create_direct_job(
-            data.get("page_url", ""), data.get("url", ""),
-            headers=headers, filename=data.get("filename") or None,
-        )
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-    return jsonify(job.to_dict()), 201
 
 
 def main():

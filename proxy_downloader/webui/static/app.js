@@ -9,8 +9,6 @@ const state = {
   uploadFoldersBySite: {},            // site -> [{id, name}, ...]
   uploadFolderChoiceBySite: {},       // site -> chosen folder id
   uploadSelectedExisting: null,       // {path, name} of an already-downloaded file picked for upload
-  sniffModalShownFor: new Set(),      // job ids whose candidate picker we've already auto-opened once
-  sniffModalJobId: null,              // job id the candidate modal is currently showing, if open
 };
 
 const els = {
@@ -18,12 +16,10 @@ const els = {
   fieldSingle: document.getElementById("field-single"),
   fieldBatch: document.getElementById("field-batch"),
   fieldVideo: document.getElementById("field-video"),
-  fieldSniff: document.getElementById("field-sniff"),
   fieldMinSpeed: document.getElementById("field-min-speed"),
   inputSingle: document.getElementById("value-single"),
   inputBatch: document.getElementById("value-batch"),
   inputVideo: document.getElementById("value-video"),
-  inputSniff: document.getElementById("value-sniff"),
   outputDir: document.getElementById("output-dir"),
   proxyMode: document.getElementById("proxy-mode"),
   minSpeed: document.getElementById("min-speed"),
@@ -69,13 +65,8 @@ const els = {
   psPassword: document.getElementById("ps-password"),
   psAddBtn: document.getElementById("ps-add-btn"),
   psError: document.getElementById("ps-error"),
-  sniffJobsList: document.getElementById("sniff-jobs-list"),
-  sniffClearFinished: document.getElementById("sniff-clear-finished"),
-  sniffModal: document.getElementById("sniff-modal"),
-  sniffModalClose: document.getElementById("sniff-modal-close"),
-  sniffCandidatesList: document.getElementById("sniff-candidates-list"),
-  sniffConfirmBtn: document.getElementById("sniff-confirm-btn"),
-  sniffCancelBtn: document.getElementById("sniff-cancel-btn"),
+  extensionJobsList: document.getElementById("extension-jobs-list"),
+  extensionClearFinished: document.getElementById("extension-clear-finished"),
 };
 
 els.tabs.forEach((tab) => {
@@ -86,15 +77,13 @@ els.tabs.forEach((tab) => {
     const isBatch = state.kind === "batch";
     const isUpload = state.kind === "upload";
     const isVideo = state.kind === "video";
-    const isSniff = state.kind === "sniff";
     els.fieldBatch.classList.toggle("hidden", !isBatch);
-    els.fieldSingle.classList.toggle("hidden", isBatch || isUpload || isVideo || isSniff);
+    els.fieldSingle.classList.toggle("hidden", isBatch || isUpload || isVideo);
     els.fieldVideo.classList.toggle("hidden", !isVideo);
-    els.fieldSniff.classList.toggle("hidden", !isSniff);
     els.fieldUpload.classList.toggle("hidden", !isUpload);
-    els.downloadOptionsRow.classList.toggle("hidden", isUpload || isSniff);
+    els.downloadOptionsRow.classList.toggle("hidden", isUpload);
     els.fieldMinSpeed.classList.toggle("hidden", isVideo);
-    els.submitBtn.textContent = isUpload ? "Subir" : isSniff ? "Detectar" : "Descargar";
+    els.submitBtn.textContent = isUpload ? "Subir" : "Descargar";
     if (isUpload) refreshUploadSites();
   });
 });
@@ -144,10 +133,6 @@ const STATUS_LABELS = {
   error: "error",
   failed: "falló",
   cancelled: "cancelado",
-  sniffing: "detectando…",
-  ready: "elegí cuáles",
-  no_candidates: "sin videos",
-  queued_download: "en cola",
   downloading: "descargando",
 };
 
@@ -195,25 +180,6 @@ els.form.addEventListener("submit", async (e) => {
     return;
   }
 
-  if (state.kind === "sniff") {
-    const url = els.inputSniff.value.trim();
-    if (!url) {
-      els.formError.textContent = "Falta la URL de la página";
-      return;
-    }
-    try {
-      await fetchJSON("/api/sniff/jobs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
-      });
-      els.inputSniff.value = "";
-      refreshSniffJobs();
-    } catch (err) {
-      els.formError.textContent = err.message;
-    }
-    return;
-  }
 
   const value = state.kind === "batch" ? els.inputBatch.value : els.inputSingle.value;
   if (!value.trim()) {
@@ -1030,14 +996,11 @@ els.videoClearFinished.addEventListener("click", async () => {
   refreshVideoJobs();
 });
 
-// ── Video (detectar): dos fases — "sniffear" la página en un navegador
-// headless, después elegir cuáles de los videos encontrados descargar. ──
+// ── Videos (extensión): jobs creados por el userscript de Violentmonkey
+// (extras/violentmonkey/video-catcher.user.js) — ya viene con el video
+// elegido, así que acá solo se muestra el progreso de la descarga. ──
 
-function fmtSizeMaybe(bytes) {
-  return bytes ? fmtBytes(bytes) : "tamaño desconocido";
-}
-
-function sniffItemProgress(item) {
+function extensionItemProgress(item) {
   const pct = item.total > 0 ? Math.min(100, (item.bytes_done / item.total) * 100) : (item.status === "done" ? 100 : 0);
   const fillClass = item.status === "done" ? "done" : item.status === "failed" ? "failed" : "";
   const speed = item.status === "running" ? fmtSpeed(item.speed_kb) : "";
@@ -1052,63 +1015,14 @@ function sniffItemProgress(item) {
   </div>`;
 }
 
-function sniffCandidateRow(c) {
-  const name = c.url.split("/").pop().split("?")[0] || c.url;
-  return `<label class="sniff-candidate-row">
-    <input type="checkbox" data-candidate-id="${c.id}" checked>
-    <span class="sniff-candidate-name">${name}<br><span class="sniff-candidate-meta">${c.content_type || ""}</span></span>
-    <span class="sniff-candidate-meta">${fmtSizeMaybe(c.size)}</span>
-  </label>`;
-}
+const EXTENSION_CANCELLABLE = new Set(["queued", "downloading"]);
+const EXTENSION_DELETABLE = new Set(["done", "done_with_errors", "error", "cancelled"]);
 
-function openSniffModal(job) {
-  state.sniffModalJobId = job.id;
-  els.sniffCandidatesList.innerHTML = job.candidates.map(sniffCandidateRow).join("");
-  els.sniffModal.classList.remove("hidden");
-}
-
-function closeSniffModal() {
-  state.sniffModalJobId = null;
-  els.sniffModal.classList.add("hidden");
-  els.sniffCandidatesList.innerHTML = "";
-}
-
-els.sniffModalClose.addEventListener("click", closeSniffModal);
-els.sniffCancelBtn.addEventListener("click", closeSniffModal);
-els.sniffModal.addEventListener("click", (e) => {
-  if (e.target === els.sniffModal) closeSniffModal();
-});
-
-els.sniffConfirmBtn.addEventListener("click", async () => {
-  const jobId = state.sniffModalJobId;
-  if (!jobId) return;
-  const candidateIds = [...els.sniffCandidatesList.querySelectorAll("input[data-candidate-id]:checked")]
-    .map((cb) => cb.dataset.candidateId);
-  if (!candidateIds.length) {
-    alert("Elegí al menos un video");
-    return;
-  }
-  try {
-    await fetchJSON(`/api/sniff/jobs/${jobId}/download`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ candidate_ids: candidateIds }),
-    });
-    closeSniffModal();
-    refreshSniffJobs();
-  } catch (err) {
-    alert(err.message);
-  }
-});
-
-const SNIFF_CANCELLABLE = new Set(["queued", "sniffing", "queued_download", "downloading"]);
-const SNIFF_DELETABLE = new Set(["done", "done_with_errors", "error", "cancelled", "no_candidates", "ready"]);
-
-function sniffJobCard(job) {
+function extensionJobCard(job) {
   const created = new Date(job.created_at * 1000).toLocaleString();
   const title = job.page_url.length > 90 ? job.page_url.slice(0, 90) + "…" : job.page_url;
-  const itemsHtml = job.items && job.items.length ? job.items.map(sniffItemProgress).join("") : "";
-  return `<div class="job" data-sniff-job="${job.id}">
+  const itemsHtml = job.items && job.items.length ? job.items.map(extensionItemProgress).join("") : "";
+  return `<div class="job" data-extension-job="${job.id}">
     <div class="job-head">
       <div>
         <div class="job-title">${title}</div>
@@ -1118,84 +1032,66 @@ function sniffJobCard(job) {
     </div>
     <div class="items">${itemsHtml}</div>
     <div class="job-actions">
-      ${job.status === "ready" ? `<button class="btn small primary" data-sniff-pick="${job.id}">Elegir videos (${job.candidates.length})</button>` : ""}
-      ${SNIFF_CANCELLABLE.has(job.status) ? `<button class="btn small danger" data-sniff-cancel="${job.id}">Cancelar</button>` : ""}
-      ${SNIFF_DELETABLE.has(job.status) ? `<button class="btn small" data-sniff-delete="${job.id}">Borrar</button>` : ""}
-      <button class="btn small" data-sniff-toggle-log="${job.id}">${state.openLogs.has(`sniff-${job.id}`) ? "Ocultar log" : "Ver log"}</button>
+      ${EXTENSION_CANCELLABLE.has(job.status) ? `<button class="btn small danger" data-extension-cancel="${job.id}">Cancelar</button>` : ""}
+      ${EXTENSION_DELETABLE.has(job.status) ? `<button class="btn small" data-extension-delete="${job.id}">Borrar</button>` : ""}
+      <button class="btn small" data-extension-toggle-log="${job.id}">${state.openLogs.has(`extension-${job.id}`) ? "Ocultar log" : "Ver log"}</button>
     </div>
-    ${state.openLogs.has(`sniff-${job.id}`) ? `<pre class="log" id="sniff-log-${job.id}">cargando…</pre>` : ""}
+    ${state.openLogs.has(`extension-${job.id}`) ? `<pre class="log" id="extension-log-${job.id}">cargando…</pre>` : ""}
   </div>`;
 }
 
-async function refreshSniffJobs() {
+async function refreshExtensionJobs() {
   try {
-    const jobs = await fetchJSON("/api/sniff/jobs");
-    els.sniffJobsList.innerHTML = jobs.length
-      ? jobs.map(sniffJobCard).join("")
+    const jobs = await fetchJSON("/api/extension/jobs");
+    els.extensionJobsList.innerHTML = jobs.length
+      ? jobs.map(extensionJobCard).join("")
       : `<p class="dim">Sin videos todavía.</p>`;
 
-    for (const job of jobs) {
-      if (job.status === "ready" && !state.sniffModalShownFor.has(job.id)) {
-        state.sniffModalShownFor.add(job.id);
-        openSniffModal(job);
-      }
-      if (job.status === "ready" && state.sniffModalJobId === job.id) {
-        // keep the open modal's list in sync in case of a concurrent refresh
-        els.sniffCandidatesList.innerHTML = job.candidates.map(sniffCandidateRow).join("");
-      }
-    }
-
-    els.sniffJobsList.querySelectorAll("button[data-sniff-pick]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const job = jobs.find((j) => j.id === btn.dataset.sniffPick);
-        if (job) openSniffModal(job);
-      });
-    });
-    els.sniffJobsList.querySelectorAll("button[data-sniff-cancel]").forEach((btn) => {
+    els.extensionJobsList.querySelectorAll("button[data-extension-cancel]").forEach((btn) => {
       btn.addEventListener("click", async () => {
         btn.disabled = true;
-        await fetch(`/api/sniff/jobs/${btn.dataset.sniffCancel}/cancel`, { method: "POST" });
-        refreshSniffJobs();
+        await fetch(`/api/extension/jobs/${btn.dataset.extensionCancel}/cancel`, { method: "POST" });
+        refreshExtensionJobs();
       });
     });
-    els.sniffJobsList.querySelectorAll("button[data-sniff-delete]").forEach((btn) => {
+    els.extensionJobsList.querySelectorAll("button[data-extension-delete]").forEach((btn) => {
       btn.addEventListener("click", async () => {
         if (!confirm("¿Borrar este video del historial? No afecta los archivos ya descargados.")) return;
         try {
-          await fetchJSON(`/api/sniff/jobs/${btn.dataset.sniffDelete}`, { method: "DELETE" });
-          refreshSniffJobs();
+          await fetchJSON(`/api/extension/jobs/${btn.dataset.extensionDelete}`, { method: "DELETE" });
+          refreshExtensionJobs();
         } catch (err) {
           alert(err.message);
         }
       });
     });
-    els.sniffJobsList.querySelectorAll("button[data-sniff-toggle-log]").forEach((btn) => {
+    els.extensionJobsList.querySelectorAll("button[data-extension-toggle-log]").forEach((btn) => {
       btn.addEventListener("click", () => {
-        const key = `sniff-${btn.dataset.sniffToggleLog}`;
+        const key = `extension-${btn.dataset.extensionToggleLog}`;
         if (state.openLogs.has(key)) state.openLogs.delete(key);
         else state.openLogs.add(key);
-        refreshSniffJobs();
+        refreshExtensionJobs();
       });
     });
     for (const job of jobs) {
-      const key = `sniff-${job.id}`;
+      const key = `extension-${job.id}`;
       if (!state.openLogs.has(key)) continue;
-      const pre = document.getElementById(`sniff-log-${job.id}`);
+      const pre = document.getElementById(`extension-log-${job.id}`);
       if (!pre) continue;
-      fetch(`/api/sniff/jobs/${job.id}/log`).then((r) => r.text()).then((text) => {
+      fetch(`/api/extension/jobs/${job.id}/log`).then((r) => r.text()).then((text) => {
         const wasAtBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 10;
         pre.textContent = text || "(sin salida todavía)";
         if (wasAtBottom) pre.scrollTop = pre.scrollHeight;
       });
     }
   } catch (err) {
-    els.sniffJobsList.innerHTML = `<p class="error-msg">${err.message}</p>`;
+    els.extensionJobsList.innerHTML = `<p class="error-msg">${err.message}</p>`;
   }
 }
 
-els.sniffClearFinished.addEventListener("click", async () => {
-  await fetch("/api/sniff/clear-finished", { method: "POST" });
-  refreshSniffJobs();
+els.extensionClearFinished.addEventListener("click", async () => {
+  await fetch("/api/extension/clear-finished", { method: "POST" });
+  refreshExtensionJobs();
 });
 
 refreshSites();
@@ -1204,9 +1100,9 @@ refreshJobs();
 refreshUploadSites();
 refreshUploadJobs();
 refreshVideoJobs();
-refreshSniffJobs();
+refreshExtensionJobs();
 setInterval(refreshJobs, 1500);
 setInterval(refreshUploadJobs, 2000);
 setInterval(refreshVideoJobs, 1500);
-setInterval(refreshSniffJobs, 2000);
+setInterval(refreshExtensionJobs, 2000);
 setInterval(() => { if (state.filesOpen) loadFiles(state.filesPath); }, 5000);
