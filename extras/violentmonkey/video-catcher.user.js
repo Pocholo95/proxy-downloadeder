@@ -54,6 +54,32 @@
 (function () {
   "use strict";
 
+  // ── Real browser-tab title, even from inside a cross-origin iframe ──
+  // document.title only reflects *this* frame's own title -- for a video
+  // embedded in a cross-origin iframe (the common case: see the @match
+  // comment above) that's usually empty or some generic player-widget
+  // title, not what's actually showing in the tab. Cross-origin frames
+  // can't read window.top.document.title directly (blocked by the same-
+  // origin policy), but postMessage works across origins for messaging,
+  // so ask the top frame for it instead. This script itself is what's
+  // listening on the other end, since @match injects it into every frame
+  // including the top one.
+  let tabTitle = window.top === window ? document.title : null;
+  window.addEventListener("message", (e) => {
+    if (e.data && e.data.__pdGetTitle && e.source) {
+      try {
+        e.source.postMessage({ __pdTitle: document.title }, "*");
+      } catch { /* ignore */ }
+    } else if (e.data && e.data.__pdTitle) {
+      tabTitle = e.data.__pdTitle;
+    }
+  });
+  if (window.top !== window) {
+    try {
+      window.top.postMessage({ __pdGetTitle: true }, "*");
+    } catch { /* ignore */ }
+  }
+
   // .ts (and DASH's .m4s) deliberately excluded -- those are individual HLS/
   // DASH *segments*, dozens/hundreds per stream, never something to download
   // on its own. The .m3u8/.mpd manifest is the one thing worth surfacing;
@@ -168,6 +194,7 @@
       headers: { "Content-Type": "application/json" },
       data: JSON.stringify({
         page_url: location.href,
+        page_title: tabTitle || document.title || "",
         url: candidate.url,
         headers: {
           referer: location.href,

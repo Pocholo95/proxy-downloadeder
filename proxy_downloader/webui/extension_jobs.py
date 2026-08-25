@@ -20,6 +20,7 @@ from collections import deque
 from pathlib import Path
 
 from ..core import aria2
+from ..utils import sanitize_filename
 from . import video_optimize
 
 TERMINAL_STATUSES = {"done", "done_with_errors", "error", "cancelled"}
@@ -32,6 +33,37 @@ def _filename_from_url(url, fallback):
     from urllib.parse import urlsplit, unquote
     name = unquote(Path(urlsplit(url).path).name)
     return name or fallback
+
+
+def _ext_from_url(url):
+    from urllib.parse import urlsplit
+    return Path(urlsplit(url).path).suffix
+
+
+def _pick_filename(url, page_title, fallback):
+    """Prefer the browser tab's title over the URL's own basename -- most
+    HLS manifests are just called index.m3u8 regardless of what video they
+    actually are (every stream off the same CDN collides on that name),
+    while the tab title is what actually identifies the video."""
+    title = (page_title or "").strip()
+    if title:
+        return sanitize_filename(title) + (_ext_from_url(url) or ".mp4")
+    return _filename_from_url(url, fallback)
+
+
+def _unique_dest(path):
+    """Never silently overwrite an existing file -- append " (2)", " (3)",
+    etc. the same way a browser's own downloads do, since two different
+    videos can easily land on the same name (same generic tab title, or
+    both falling back to a manifest basename like index.m3u8)."""
+    if not path.exists():
+        return path
+    stem, suffix, n = path.stem, path.suffix, 2
+    while True:
+        candidate = path.with_name(f"{stem} ({n}){suffix}")
+        if not candidate.exists():
+            return candidate
+        n += 1
 
 
 class ExtensionJob:
@@ -152,7 +184,7 @@ class ExtensionJobManager:
         self.order = keep
 
     # ── jobs ──
-    def create_job(self, page_url, url, headers=None, filename=None, output_dir=None):
+    def create_job(self, page_url, url, headers=None, filename=None, page_title=None, output_dir=None):
         page_url = (page_url or "").strip()
         url = (url or "").strip()
         if not url:
@@ -162,7 +194,7 @@ class ExtensionJobManager:
         job = ExtensionJob(job_id, page_url or url, str(out_dir))
         job.items = [{
             "url": url, "headers": dict(headers or {}),
-            "filename": filename or _filename_from_url(url, f"{job_id}.mp4"),
+            "filename": filename or _pick_filename(url, page_title, f"{job_id}.mp4"),
             "status": "queued", "bytes_done": 0, "total": 0,
             "speed_kb": 0, "message": None, "path": None,
         }]
@@ -277,12 +309,24 @@ class ExtensionJobManager:
         self._persist()
 
     def _download_one(self, job, item, last_persist):
-        from ..utils import sanitize_filename
-        dest = Path(job.output_dir) / sanitize_filename(item["filename"])
         url = item["url"]
         headers = dict(item["headers"])
+        is_hls = url.split("?")[0].lower().endswith(_HLS_DASH_EXTS)
 
-        if url.split("?")[0].lower().endswith(_HLS_DASH_EXTS):
+        fname = Path(sanitize_filename(item["filename"]))
+        # ffmpeg always muxes HLS/DASH to .mp4 (see _download_via_ffmpeg) --
+        # resolve that *before* checking uniqueness below, otherwise two
+        # different "index.m3u8" downloads would both pass the uniqueness
+        # check (nothing else is ever named "index.m3u8" on disk) and only
+        # collide once ffmpeg renames them both to "index.mp4".
+        if is_hls and fname.suffix.lower() not in (".mp4", ".mkv"):
+            fname = fname.with_suffix(".mp4")
+
+        dest = _unique_dest(Path(job.output_dir) / fname)
+        with job.lock:
+            item["filename"] = dest.name
+
+        if is_hls:
             return self._download_via_ffmpeg(job, item, url, headers, dest)
 
         tmp = dest.with_suffix(dest.suffix + ".part")
@@ -313,9 +357,9 @@ class ExtensionJobManager:
         return dest
 
     def _download_via_ffmpeg(self, job, item, url, headers, dest):
+        # dest's extension and uniqueness are already resolved by the
+        # caller (_download_one) before it decides to come down this path.
         import subprocess
-        if dest.suffix.lower() not in (".mp4", ".mkv"):
-            dest = dest.with_suffix(".mp4")
         header_lines = "".join(f"{k}: {v}\r\n" for k, v in headers.items())
         cmd = ["ffmpeg", "-y", "-nostdin"]
         if header_lines:

@@ -458,6 +458,7 @@ def api_extension_download():
         job = extension_manager.create_job(
             data.get("page_url", ""), data.get("url", ""),
             headers=headers, filename=data.get("filename") or None,
+            page_title=data.get("page_title") or None,
         )
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
