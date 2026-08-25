@@ -64,20 +64,54 @@
   // so ask the top frame for it instead. This script itself is what's
   // listening on the other end, since @match injects it into every frame
   // including the top one.
-  let tabTitle = window.top === window ? document.title : null;
+  //
+  // This always-on listener answers other frames' title requests; it has
+  // to stay registered for the page's whole lifetime since a request can
+  // come in at any time. The *asking* side is deliberately NOT done once
+  // here at load -- @run-at document-start means this script runs before
+  // the page has even parsed its own <title> tag, let alone before any
+  // SPA-style JS sets a more specific one after the video loads, so a
+  // title grabbed this early is reliably wrong (that's what caused a
+  // download to get saved as a raw CDN filename instead of a real title).
+  // getFreshTabTitle() below asks fresh, right when a download is about
+  // to be sent, by which point the user has actually been looking at the
+  // page long enough for its title to have settled.
   window.addEventListener("message", (e) => {
     if (e.data && e.data.__pdGetTitle && e.source) {
       try {
-        e.source.postMessage({ __pdTitle: document.title }, "*");
+        e.source.postMessage({ __pdTitle: document.title, __pdReqId: e.data.__pdReqId }, "*");
       } catch { /* ignore */ }
-    } else if (e.data && e.data.__pdTitle) {
-      tabTitle = e.data.__pdTitle;
     }
   });
-  if (window.top !== window) {
-    try {
-      window.top.postMessage({ __pdGetTitle: true }, "*");
-    } catch { /* ignore */ }
+
+  function getFreshTabTitle() {
+    if (window.top === window) return Promise.resolve(document.title);
+    return new Promise((resolve) => {
+      const reqId = Math.random().toString(36).slice(2);
+      let settled = false;
+      const finish = (title) => {
+        if (settled) return;
+        settled = true;
+        window.removeEventListener("message", listener);
+        resolve(title);
+      };
+      const listener = (e) => {
+        if (e.data && e.data.__pdTitle !== undefined && e.data.__pdReqId === reqId) {
+          finish(e.data.__pdTitle);
+        }
+      };
+      window.addEventListener("message", listener);
+      try {
+        window.top.postMessage({ __pdGetTitle: true, __pdReqId: reqId }, "*");
+      } catch {
+        finish(document.title);
+        return;
+      }
+      // No response (top frame's own userscript instance hasn't attached
+      // its listener yet, cross-origin restrictions on postMessage itself,
+      // etc.) -- fall back to this frame's own title rather than hang.
+      setTimeout(() => finish(document.title), 500);
+    });
   }
 
   // .ts (and DASH's .m4s) deliberately excluded -- those are individual HLS/
@@ -182,19 +216,20 @@
     chosen.forEach(sendToDownloader);
   }
 
-  function sendToDownloader(candidate) {
+  async function sendToDownloader(candidate) {
     const server = GM_getValue("server", "");
     if (!server) {
       alert('Configurá la URL de tu Proxy Downloader primero: menú de Violentmonkey en esta página → "Configurar servidor".');
       return;
     }
+    const title = await getFreshTabTitle();
     GM_xmlhttpRequest({
       method: "POST",
       url: server.replace(/\/+$/, "") + "/api/extension/download",
       headers: { "Content-Type": "application/json" },
       data: JSON.stringify({
         page_url: location.href,
-        page_title: tabTitle || document.title || "",
+        page_title: title || "",
         url: candidate.url,
         headers: {
           referer: location.href,
