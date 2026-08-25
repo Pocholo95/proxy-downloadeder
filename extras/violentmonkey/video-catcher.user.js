@@ -54,7 +54,11 @@
 (function () {
   "use strict";
 
-  const VIDEO_EXT_RE = /\.(mp4|webm|mkv|mov|m3u8|mpd|avi|ts|flv|m4v)(\?|$)/i;
+  // .ts (and DASH's .m4s) deliberately excluded -- those are individual HLS/
+  // DASH *segments*, dozens/hundreds per stream, never something to download
+  // on its own. The .m3u8/.mpd manifest is the one thing worth surfacing;
+  // ffmpeg reads it and fetches every segment itself when it downloads.
+  const VIDEO_EXT_RE = /\.(mp4|webm|mkv|mov|m3u8|mpd|avi|flv|m4v)(\?|$)/i;
   const candidates = new Map(); // url -> {url, contentType, size}
 
   function looksLikeVideoUrl(url) {

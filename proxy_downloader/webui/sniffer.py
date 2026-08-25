@@ -16,7 +16,11 @@ from urllib.parse import urlsplit
 
 from playwright.sync_api import sync_playwright
 
-_VIDEO_EXT_RE = re.compile(r"\.(mp4|webm|mkv|mov|m3u8|mpd|avi|ts|flv|m4v)$", re.I)
+# .ts (and DASH's .m4s) deliberately excluded -- those are individual HLS/
+# DASH *segments*, dozens/hundreds per stream, never something worth
+# surfacing as a candidate on their own. The .m3u8/.mpd manifest is the one
+# thing worth listing; ffmpeg reads it and fetches every segment itself.
+_VIDEO_EXT_RE = re.compile(r"\.(mp4|webm|mkv|mov|m3u8|mpd|avi|flv|m4v)$", re.I)
 
 # Heuristics for "the big play button", roughly in order of how common each
 # player library is — checked on the main page and inside every iframe
