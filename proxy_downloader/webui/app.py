@@ -17,6 +17,7 @@ from . import video_optimize
 from .jobs import JobManager
 from .upload_jobs import UploadManager
 from .ytdlp_jobs import YtdlpManager
+from .sniff_jobs import SniffManager
 
 OUTPUT_DIR = os.environ.get("DOWNLOAD_DIR", "/downloads")
 STATE_DIR = os.environ.get("STATE_DIR", "/app/state")
@@ -26,6 +27,7 @@ app = Flask(__name__)
 manager = JobManager(base_output_dir=OUTPUT_DIR, state_dir=STATE_DIR)
 upload_manager = UploadManager(state_dir=STATE_DIR, tmp_dir=UPLOAD_TMP_DIR)
 ytdlp_manager = YtdlpManager(base_output_dir=OUTPUT_DIR, state_dir=STATE_DIR)
+sniff_manager = SniffManager(base_output_dir=OUTPUT_DIR, state_dir=STATE_DIR)
 
 
 @app.get("/")
@@ -432,6 +434,72 @@ def api_delete_ytdlp_job(job_id):
 @app.post("/api/ytdlp/clear-finished")
 def api_clear_finished_ytdlp():
     removed = ytdlp_manager.clear_finished()
+    return jsonify({"ok": True, "removed": removed})
+
+
+@app.get("/api/sniff/jobs")
+def api_list_sniff_jobs():
+    return jsonify([j.to_dict() for j in sniff_manager.list_jobs()])
+
+
+@app.post("/api/sniff/jobs")
+def api_create_sniff_job():
+    data = request.get_json(silent=True) or {}
+    try:
+        job = sniff_manager.create_job(data.get("url", ""), output_dir=data.get("output_dir") or None)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify(job.to_dict()), 201
+
+
+@app.get("/api/sniff/jobs/<job_id>")
+def api_get_sniff_job(job_id):
+    job = sniff_manager.get(job_id)
+    if not job:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(job.to_dict())
+
+
+@app.get("/api/sniff/jobs/<job_id>/log")
+def api_get_sniff_job_log(job_id):
+    job = sniff_manager.get(job_id)
+    if not job:
+        return jsonify({"error": "not found"}), 404
+    return job.log_text(), 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+
+@app.post("/api/sniff/jobs/<job_id>/download")
+def api_confirm_sniff_download(job_id):
+    data = request.get_json(silent=True) or {}
+    try:
+        job = sniff_manager.confirm_download(job_id, data.get("candidate_ids") or [])
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify(job.to_dict())
+
+
+@app.post("/api/sniff/jobs/<job_id>/cancel")
+def api_cancel_sniff_job(job_id):
+    ok = sniff_manager.cancel(job_id)
+    if not ok:
+        return jsonify({"error": "job not cancellable (already finished, or not found)"}), 409
+    return jsonify({"ok": True})
+
+
+@app.delete("/api/sniff/jobs/<job_id>")
+def api_delete_sniff_job(job_id):
+    try:
+        ok = sniff_manager.delete_job(job_id)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 409
+    if not ok:
+        return jsonify({"error": "not found"}), 404
+    return jsonify({"ok": True})
+
+
+@app.post("/api/sniff/clear-finished")
+def api_clear_finished_sniff():
+    removed = sniff_manager.clear_finished()
     return jsonify({"ok": True, "removed": removed})
 
 

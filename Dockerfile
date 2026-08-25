@@ -29,6 +29,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg supervis
 COPY requirements.txt requirements-webui.txt ./
 RUN pip install --no-cache-dir -r requirements-webui.txt
 
+# Headless Chromium for the "Video" tab's page sniffer (proxy_downloader/
+# webui/sniffer.py) — for sites yt-dlp has no extractor for, it loads the
+# real page and watches network responses for anything video-shaped
+# (same idea as the Video DownloadHelper browser extension), since some
+# sites only construct the actual signed media URL via JS at playback
+# time and never put it in the plain HTML a static fetch would see.
+# --with-deps pulls the apt packages Chromium needs (fonts, GTK/NSS
+# libs, etc.) that aren't in this slim base image.
+RUN playwright install --with-deps chromium
+
 COPY downloader.py webui.py ./
 COPY proxy_downloader ./proxy_downloader
 

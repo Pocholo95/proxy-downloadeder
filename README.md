@@ -293,6 +293,37 @@ Tiene su propio historial ("Videos (yt-dlp)", persistido en
 Todo video que termine de bajar se optimiza para streaming igual que
 cualquier otra descarga (ver más abajo).
 
+### Video (detectar)
+
+Quinta pestaña: para páginas que ni yt-dlp (ni su extractor genérico)
+resuelve — sitios sin extractor específico donde el video real se arma
+por JS recién al reproducir, nunca aparece en el HTML plano. Es el mismo
+truco que usa la extensión **Video DownloadHelper**: abre la página en un
+navegador headless (Playwright + Chromium), la deja cargar, intenta
+clickear un botón de play si encuentra uno (heurística por selectores
+comunes — Plyr, Video.js, JW Player, etc., adentro de la página y de
+cualquier iframe), y mira **toda la red** que pasó mientras tanto por
+cualquier cosa con pinta de video (`.mp4`, `.webm`, `.m3u8`, `.mpd`, ...).
+También guarda los headers (`Referer`, `Origin`, `User-Agent`, `Cookie`)
+que usó esa petición real — muchos CDN rechazan la descarga si no vienen,
+así que se reusan tal cual al bajar el archivo después.
+
+Pegás la URL de la **página** (no el link directo del video, ese ya lo
+tenés si lo tenías) y esperás ~10-15s — carga la página real, no es
+instantáneo. Cuando termina, se abre un diálogo con **todo lo que
+encontró, sin tildar nada por default**: elegís cuáles de esos querés
+(puede haber más de uno — el video real, algún preview, publicidad) y
+recién ahí arranca la descarga de los que tildaste.
+
+Es el último recurso, no el primero — yt-dlp (extractor específico o
+genérico) y los `SiteProvider` de `sites/` son más rápidos y confiables
+cuando aplican, así que probalos primero. Esto no tiene garantía de
+funcionar en cualquier sitio (players raros, contenido que solo carga
+tras varias interacciones, DRM) — es heurística, no magia. Su propio
+historial ("Videos detectados", `state/sniff.json`) sigue el mismo
+patrón que el resto: progreso en vivo, log, cancelar, borrar, auto-
+optimize de faststart al terminar.
+
 ### Subir archivos
 
 Es la tercera pestaña de "Nueva descarga" (junto a "Archivo / Carpeta" y
@@ -422,8 +453,11 @@ La API REST que usa el frontend (`GET/POST /api/jobs`, `GET /api/jobs/<id>`,
 `POST /api/uploads/clear-finished`, `GET/POST /api/ytdlp/jobs`,
 `GET /api/ytdlp/jobs/<id>`, `GET /api/ytdlp/jobs/<id>/log`,
 `POST /api/ytdlp/jobs/<id>/cancel`, `DELETE /api/ytdlp/jobs/<id>`,
-`POST /api/ytdlp/clear-finished`) es la misma que consume la página — se
-puede scriptear igual.
+`POST /api/ytdlp/clear-finished`, `GET/POST /api/sniff/jobs`,
+`GET /api/sniff/jobs/<id>`, `GET /api/sniff/jobs/<id>/log`,
+`POST /api/sniff/jobs/<id>/download`, `POST /api/sniff/jobs/<id>/cancel`,
+`DELETE /api/sniff/jobs/<id>`, `POST /api/sniff/clear-finished`) es la
+misma que consume la página — se puede scriptear igual.
 
 ## VidGrid (incluido en la misma imagen)
 
