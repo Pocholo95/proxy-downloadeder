@@ -41,6 +41,7 @@ webui.py                    punto de entrada del servidor web (interfaz)
 python downloader.py -f https://pixeldrain.com/u/XXXXXXX
 python downloader.py -f https://www.mediafire.com/file/XXXXXXX/nombre/file
 python downloader.py -f https://mega.nz/file/XXXXXXXX#clave
+python downloader.py -F https://mega.nz/folder/XXXXXXXX#clave
 python downloader.py -f https://1fichier.com/?XXXXXXXXX
 python downloader.py -f https://gofile.io/d/XXXXXXX      # archivo suelto
 python downloader.py -F https://gofile.io/d/XXXXXXX      # o carpeta — mismo link, se detecta solo
@@ -80,10 +81,12 @@ a la raíz. Las etiquetas no se tocan al re-correr el batch — solo los links
 individuales se van marcando `# [OK]` / `# [FAILED]` como siempre.
 
 > Notas de alcance:
-> - Mega todavía no soporta carpetas (`-F`/links `/folder/`) — usa una API
->   distinta con claves por-archivo derivadas de la clave de la carpeta, y
->   preferí no adivinar ese protocolo. Los archivos sueltos funcionan completos
->   (descarga + descifrado + verificación de integridad).
+> - Mega sí soporta carpetas (`-F`/links `/folder/...#...`) — lista el
+>   contenido con la API de carpetas de Mega (`n=` en vez de `p=`) y
+>   descifra la clave de cada archivo con la clave de la carpeta; de ahí en
+>   más cada archivo se descarga/descifra/verifica igual que uno suelto.
+>   No preserva subcarpetas anidadas — todo cae en una sola carpeta de
+>   salida, igual que Pixeldrain/Gofile/Bunkr/Filester.
 > - 1fichier gratis/anónimo limita a ~1 descarga por IP por hora, pero además
 >   **bloquea directo cualquier IP que identifique como datacenter/proxy/VPN**
 >   ("professional infrastructure detected") — que es exactamente lo que son
