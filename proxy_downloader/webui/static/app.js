@@ -1,7 +1,7 @@
 const state = {
   kind: "auto",
-  openLogs: new Set(),
-  openVideoLogs: new Set(),
+  openLogs: new Set(),                // uid ("jobs:<id>" | "video:<id>" | "extension:<id>")
+  activityFilter: "all",              // "all" | "jobs" | "video"
   filesOpen: false,
   filesPath: "",
   uploadSites: [],                    // from /api/uploads/sites
@@ -9,6 +9,7 @@ const state = {
   uploadFoldersBySite: {},            // site -> [{id, name}, ...]
   uploadFolderChoiceBySite: {},       // site -> chosen folder id
   uploadSelectedExisting: null,       // {path, name} of an already-downloaded file picked for upload
+  uploadGroupOverride: new Map(),     // source_name -> explicit open/closed the user picked
 };
 
 const els = {
@@ -25,7 +26,9 @@ const els = {
   minSpeed: document.getElementById("min-speed"),
   form: document.getElementById("job-form"),
   formError: document.getElementById("form-error"),
-  jobsList: document.getElementById("jobs-list"),
+  activityList: document.getElementById("activity-list"),
+  activityClearFinished: document.getElementById("activity-clear-finished"),
+  activityFilters: document.getElementById("activity-filters"),
   sitesList: document.getElementById("sites-list"),
   toggleSites: document.getElementById("toggle-sites"),
   filesPanel: document.getElementById("files-panel"),
@@ -33,7 +36,6 @@ const els = {
   filesBreadcrumb: document.getElementById("files-breadcrumb"),
   toggleFiles: document.getElementById("toggle-files"),
   refreshFiles: document.getElementById("refresh-files"),
-  clearFinished: document.getElementById("clear-finished"),
   previewModal: document.getElementById("preview-modal"),
   previewContent: document.getElementById("preview-content"),
   previewClose: document.getElementById("preview-close"),
@@ -48,8 +50,6 @@ const els = {
   uploadFormError: document.getElementById("upload-form-error"),
   uploadJobsList: document.getElementById("upload-jobs-list"),
   uploadClearFinished: document.getElementById("upload-clear-finished"),
-  videoJobsList: document.getElementById("video-jobs-list"),
-  videoClearFinished: document.getElementById("video-clear-finished"),
   toggleProxySources: document.getElementById("toggle-proxy-sources"),
   proxySourcesPanel: document.getElementById("proxy-sources-panel"),
   proxySourcesList: document.getElementById("proxy-sources-list"),
@@ -65,8 +65,6 @@ const els = {
   psPassword: document.getElementById("ps-password"),
   psAddBtn: document.getElementById("ps-add-btn"),
   psError: document.getElementById("ps-error"),
-  extensionJobsList: document.getElementById("extension-jobs-list"),
-  extensionClearFinished: document.getElementById("extension-clear-finished"),
 };
 
 els.tabs.forEach((tab) => {
@@ -101,10 +99,14 @@ els.toggleProxySources.addEventListener("click", () => {
   els.proxySourcesPanel.classList.toggle("hidden");
 });
 
-els.clearFinished.addEventListener("click", async () => {
-  if (!confirm("¿Borrar del historial todos los trabajos ya terminados? No afecta los archivos descargados.")) return;
-  await fetch("/api/jobs/clear-finished", { method: "POST" });
-  refreshJobs();
+els.activityClearFinished.addEventListener("click", async () => {
+  if (!confirm("¿Borrar del historial todo lo ya terminado? No afecta los archivos ya descargados.")) return;
+  await Promise.all([
+    fetch("/api/jobs/clear-finished", { method: "POST" }),
+    fetch("/api/ytdlp/clear-finished", { method: "POST" }),
+    fetch("/api/extension/clear-finished", { method: "POST" }),
+  ]);
+  refreshActivity();
 });
 
 function fmtBytes(n) {
@@ -134,6 +136,7 @@ const STATUS_LABELS = {
   failed: "falló",
   cancelled: "cancelado",
   downloading: "descargando",
+  uploading: "subiendo",
 };
 
 const ENGINE_LABELS = { aria2: "⚡ aria2", ffmpeg: "🎞 ffmpeg", requests: "requests", "yt-dlp": "yt-dlp nativo" };
@@ -144,6 +147,10 @@ function engineLabel(engine) {
 const CANCELLABLE_STATUSES = new Set(["queued", "resolving", "fetching_proxies", "running"]);
 const RETRYABLE_STATUSES = new Set(["done_with_errors", "error", "cancelled"]);
 const DELETABLE_STATUSES = new Set(["done", "done_with_errors", "error", "cancelled"]);
+const VIDEO_CANCELLABLE = new Set(["queued", "running"]);
+const VIDEO_DELETABLE = new Set(["done", "error", "cancelled"]);
+const EXTENSION_CANCELLABLE = new Set(["queued", "downloading"]);
+const EXTENSION_DELETABLE = new Set(["done", "done_with_errors", "error", "cancelled"]);
 
 // The various refresh*() functions below poll every 1.5-2s and used to
 // replace a whole list's innerHTML every single tick regardless of whether
@@ -197,7 +204,7 @@ els.form.addEventListener("submit", async (e) => {
         }),
       });
       els.inputVideo.value = "";
-      refreshVideoJobs();
+      refreshActivity();
     } catch (err) {
       els.formError.textContent = err.message;
     }
@@ -225,7 +232,7 @@ els.form.addEventListener("submit", async (e) => {
     });
     els.inputSingle.value = "";
     els.inputBatch.value = "";
-    refreshJobs();
+    refreshActivity();
   } catch (err) {
     els.formError.textContent = err.message;
   }
@@ -349,94 +356,173 @@ els.psAddBtn.addEventListener("click", async () => {
   }
 });
 
-function itemProgress(item) {
+// ── Actividad: una sola lista fusionando los 3 motores de descarga
+// (Trabajos/SiteProvider, yt-dlp, extensión) en vez de 3 secciones
+// separadas -- cada uno se normaliza a la misma forma y se renderiza con
+// el mismo activityCard(), así que cancelar/reintentar/borrar/ver-log
+// funcionan igual sin importar cuál de los 3 motores hizo la descarga.
+
+function activityItemRow(item) {
   const pct = item.total > 0 ? Math.min(100, (item.bytes_done / item.total) * 100) : (item.status === "done" ? 100 : 0);
   const fillClass = item.status === "done" ? "done" : item.status === "failed" ? "failed" : "";
-  const speed = item.status === "running" ? fmtSpeed(item.speed_kb) : "";
+  const speed = (item.status === "running" || item.status === "downloading") ? fmtSpeed(item.speed_kb) : "";
   const sizeLabel = item.total > 0 ? `${fmtBytes(item.bytes_done)} / ${fmtBytes(item.total)}` : fmtBytes(item.bytes_done);
+  const bits = [item.modeLabel, engineLabel(item.engine), sizeLabel, speed, item.message].filter(Boolean);
+  const nameRow = item.filename
+    ? `<div class="item-row">
+        <span class="item-name">${item.filename}${item.site ? ` <span class="dim">(${item.site})</span>` : ""}</span>
+        <span class="badge ${item.status}">${STATUS_LABELS[item.status] || item.status}</span>
+      </div>`
+    : "";
   return `<div class="item">
-    <div class="item-row">
-      <span class="item-name">${item.filename || item.file_id} <span class="dim">(${item.site})</span></span>
-      <span class="badge ${item.status}">${STATUS_LABELS[item.status] || item.status}</span>
-    </div>
-    <div class="item-sub">${item.mode === "proxy" ? "vía proxy" : "directo"} ${engineLabel(item.engine) ? "· " + engineLabel(item.engine) : ""} ${sizeLabel ? "· " + sizeLabel : ""} ${speed ? "· " + speed : ""} ${item.message ? "· " + item.message : ""}</div>
+    ${nameRow}
+    <div class="item-sub">${bits.join(" · ")}</div>
     <div class="progress-bar"><div class="progress-fill ${fillClass}" style="width:${pct}%"></div></div>
   </div>`;
 }
 
-function jobCard(job) {
-  const title = job.input.length > 90 ? job.input.slice(0, 90) + "…" : job.input;
-  const created = new Date(job.created_at * 1000).toLocaleString();
-  const logOpen = state.openLogs.has(job.id);
+function normalizeJobsEntry(job) {
   const hasRetryable = job.items.some((it) => it.status === "failed" || it.status === "cancelled");
-  return `<div class="job" data-job="${job.id}">
+  return {
+    uid: `jobs:${job.id}`, id: job.id, apiBase: "/api/jobs", kind: "jobs",
+    title: `[${job.kind}] ${job.input.length > 90 ? job.input.slice(0, 90) + "…" : job.input}`,
+    meta: `salida: ${job.output_dir} · ${job.summary.done}/${job.summary.total} ok${job.summary.failed ? `, ${job.summary.failed} fallidos` : ""}${job.error ? " · " + job.error : ""}`,
+    status: job.status, statusLabel: STATUS_LABELS[job.status] || job.status,
+    items: job.items.map((it) => ({
+      filename: it.filename || it.file_id, site: it.site, status: it.status,
+      bytes_done: it.bytes_done, total: it.total, speed_kb: it.speed_kb, message: it.message,
+      engine: it.engine, modeLabel: it.mode === "proxy" ? "vía proxy" : "directo",
+    })),
+    cancellable: CANCELLABLE_STATUSES.has(job.status), cancelling: job.status === "cancelling",
+    deletable: DELETABLE_STATUSES.has(job.status),
+    retryable: RETRYABLE_STATUSES.has(job.status) && hasRetryable,
+    created_at: job.created_at,
+  };
+}
+
+function normalizeYtdlpEntry(job) {
+  const title = job.title || job.filename || job.url;
+  return {
+    uid: `video:${job.id}`, id: job.id, apiBase: "/api/ytdlp/jobs", kind: "video",
+    title: title.length > 90 ? title.slice(0, 90) + "…" : title,
+    meta: `salida: ${job.output_dir}${engineLabel(job.engine) ? " · " + engineLabel(job.engine) : ""}${job.error ? " · " + job.error : ""}`,
+    status: job.status, statusLabel: STATUS_LABELS[job.status] || job.status,
+    items: [{
+      filename: null, site: null, status: job.status, bytes_done: job.bytes_done, total: job.total,
+      speed_kb: job.speed_kb, message: null, engine: null, modeLabel: null,
+    }],
+    cancellable: VIDEO_CANCELLABLE.has(job.status), cancelling: job.status === "cancelling",
+    deletable: VIDEO_DELETABLE.has(job.status), retryable: false,
+    created_at: job.created_at,
+  };
+}
+
+function normalizeExtensionEntry(job) {
+  return {
+    uid: `extension:${job.id}`, id: job.id, apiBase: "/api/extension/jobs", kind: "video",
+    title: job.page_url.length > 90 ? job.page_url.slice(0, 90) + "…" : job.page_url,
+    meta: job.error || "",
+    status: job.status, statusLabel: STATUS_LABELS[job.status] || job.status,
+    items: (job.items || []).map((it) => ({
+      filename: it.filename, site: null, status: it.status,
+      bytes_done: it.bytes_done, total: it.total, speed_kb: it.speed_kb, message: it.message,
+      engine: it.engine, modeLabel: null,
+    })),
+    cancellable: EXTENSION_CANCELLABLE.has(job.status), cancelling: false,
+    deletable: EXTENSION_DELETABLE.has(job.status), retryable: false,
+    created_at: job.created_at,
+  };
+}
+
+function activityCard(entry) {
+  const created = new Date(entry.created_at * 1000).toLocaleString();
+  const logOpen = state.openLogs.has(entry.uid);
+  return `<div class="job" data-uid="${entry.uid}">
     <div class="job-head">
       <div>
-        <div class="job-title">[${job.kind}] ${title}</div>
-        <div class="job-meta">${created} · salida: ${job.output_dir} · ${job.summary.done}/${job.summary.total} ok${job.summary.failed ? `, ${job.summary.failed} fallidos` : ""}${job.error ? " · " + job.error : ""}</div>
+        <div class="job-title">${entry.title}</div>
+        <div class="job-meta">${created}${entry.meta ? " · " + entry.meta : ""}</div>
       </div>
-      <span class="badge ${job.status}">${STATUS_LABELS[job.status] || job.status}</span>
+      <span class="badge ${entry.status}">${entry.statusLabel}</span>
     </div>
-    <div class="items">${job.items.map(itemProgress).join("")}</div>
+    <div class="items">${entry.items.map(activityItemRow).join("")}</div>
     <div class="job-actions">
-      ${CANCELLABLE_STATUSES.has(job.status) ? `<button class="btn small danger" data-cancel="${job.id}" ${job.status === "cancelling" ? "disabled" : ""}>${job.status === "cancelling" ? "Cancelando…" : "Cancelar"}</button>` : ""}
-      ${RETRYABLE_STATUSES.has(job.status) && hasRetryable ? `<button class="btn small" data-retry="${job.id}">Reintentar fallidos</button>` : ""}
-      ${DELETABLE_STATUSES.has(job.status) ? `<button class="btn small" data-delete-job="${job.id}">Borrar</button>` : ""}
-      <button class="btn small" data-toggle-log="${job.id}">${logOpen ? "Ocultar log" : "Ver log"}</button>
+      ${entry.cancellable ? `<button class="btn small danger" data-action="cancel" data-api-base="${entry.apiBase}" data-id="${entry.id}" ${entry.cancelling ? "disabled" : ""}>${entry.cancelling ? "Cancelando…" : "Cancelar"}</button>` : ""}
+      ${entry.retryable ? `<button class="btn small" data-action="retry" data-api-base="${entry.apiBase}" data-id="${entry.id}">Reintentar fallidos</button>` : ""}
+      ${entry.deletable ? `<button class="btn small" data-action="delete-activity" data-api-base="${entry.apiBase}" data-id="${entry.id}">Borrar</button>` : ""}
+      <button class="btn small" data-action="toggle-log" data-uid="${entry.uid}">${logOpen ? "Ocultar log" : "Ver log"}</button>
     </div>
-    ${logOpen ? `<pre class="log" id="log-${job.id}">cargando…</pre>` : ""}
+    ${logOpen ? `<pre class="log" id="log-${entry.uid}">cargando…</pre>` : ""}
   </div>`;
 }
 
-async function refreshJobs() {
-  try {
-    const jobs = await fetchJSON("/api/jobs");
-    const html = jobs.length ? jobs.map(jobCard).join("") : `<p class="dim">Sin trabajos todavía.</p>`;
-    if (updateListHTML(els.jobsList, "jobs", html)) {
-      els.jobsList.querySelectorAll("button[data-cancel]").forEach((btn) => {
-        btn.addEventListener("click", async () => {
-          btn.disabled = true;
-          await fetch(`/api/jobs/${btn.dataset.cancel}/cancel`, { method: "POST" });
-          refreshJobs();
-        });
-      });
-      els.jobsList.querySelectorAll("button[data-retry]").forEach((btn) => {
-        btn.addEventListener("click", async () => {
-          try {
-            await fetchJSON(`/api/jobs/${btn.dataset.retry}/retry`, { method: "POST" });
-          } catch (err) {
-            alert(err.message);
-          }
-          refreshJobs();
-        });
-      });
-      els.jobsList.querySelectorAll("button[data-delete-job]").forEach((btn) => {
-        btn.addEventListener("click", async () => {
-          if (!confirm("¿Borrar este trabajo del historial? No afecta los archivos ya descargados.")) return;
-          await fetch(`/api/jobs/${btn.dataset.deleteJob}`, { method: "DELETE" });
-          refreshJobs();
-        });
-      });
-      els.jobsList.querySelectorAll("button[data-toggle-log]").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          const id = btn.dataset.toggleLog;
-          if (state.openLogs.has(id)) state.openLogs.delete(id);
-          else state.openLogs.add(id);
-          refreshJobs();
-        });
-      });
+// Delegated on the container, bound once -- never needs rebinding when
+// updateListHTML() skips a DOM rebuild because nothing actually changed.
+els.activityList.addEventListener("click", async (e) => {
+  const btn = e.target.closest("button[data-action]");
+  if (!btn) return;
+  const { action, apiBase, id, uid } = btn.dataset;
+  if (action === "cancel") {
+    btn.disabled = true;
+    await fetch(`${apiBase}/${id}/cancel`, { method: "POST" });
+    refreshActivity();
+  } else if (action === "retry") {
+    try {
+      await fetchJSON(`${apiBase}/${id}/retry`, { method: "POST" });
+    } catch (err) {
+      alert(err.message);
     }
-    for (const id of state.openLogs) {
-      const pre = document.getElementById(`log-${id}`);
+    refreshActivity();
+  } else if (action === "delete-activity") {
+    if (!confirm("¿Borrar del historial? No afecta los archivos ya descargados.")) return;
+    try {
+      await fetchJSON(`${apiBase}/${id}`, { method: "DELETE" });
+      refreshActivity();
+    } catch (err) {
+      alert(err.message);
+    }
+  } else if (action === "toggle-log") {
+    if (state.openLogs.has(uid)) state.openLogs.delete(uid);
+    else state.openLogs.add(uid);
+    refreshActivity();
+  }
+});
+
+els.activityFilters.addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-filter]");
+  if (!btn) return;
+  state.activityFilter = btn.dataset.filter;
+  els.activityFilters.querySelectorAll(".chip").forEach((c) => c.classList.toggle("active", c === btn));
+  refreshActivity();
+});
+
+async function refreshActivity() {
+  try {
+    const [jobs, videos, exts] = await Promise.all([
+      fetchJSON("/api/jobs"), fetchJSON("/api/ytdlp/jobs"), fetchJSON("/api/extension/jobs"),
+    ]);
+    let entries = [
+      ...jobs.map(normalizeJobsEntry),
+      ...videos.map(normalizeYtdlpEntry),
+      ...exts.map(normalizeExtensionEntry),
+    ];
+    entries.sort((a, b) => b.created_at - a.created_at);
+    const filtered = state.activityFilter === "all" ? entries : entries.filter((e) => e.kind === state.activityFilter);
+    const html = filtered.length ? filtered.map(activityCard).join("") : `<p class="dim">Sin actividad todavía.</p>`;
+    updateListHTML(els.activityList, "activity:" + state.activityFilter, html);
+
+    for (const entry of filtered) {
+      if (!state.openLogs.has(entry.uid)) continue;
+      const pre = document.getElementById(`log-${entry.uid}`);
       if (!pre) continue;
-      fetch(`/api/jobs/${id}/log`).then((r) => r.text()).then((text) => {
+      fetch(`${entry.apiBase}/${entry.id}/log`).then((r) => r.text()).then((text) => {
         const wasAtBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 10;
         pre.textContent = text || "(sin salida todavía)";
         if (wasAtBottom) pre.scrollTop = pre.scrollHeight;
       });
     }
   } catch (err) {
-    els.jobsList.innerHTML = `<p class="error-msg">${err.message}</p>`;
+    els.activityList.innerHTML = `<p class="error-msg">${err.message}</p>`;
   }
 }
 
@@ -876,59 +962,94 @@ function fallbackCopy(text, done) {
   document.body.removeChild(ta);
 }
 
-function uploadJobCard(job) {
-  const created = new Date(job.created_at * 1000).toLocaleString();
-  const dest = job.dest_folder_name ? ` → ${job.dest_folder_name}` : "";
-  const uploading = job.status === "uploading";
+// ── Subidas: agrupadas por archivo fuente (source_name), no por sitio --
+// un mismo archivo subido a 3 sitios daba 3 filas sueltas sin relación
+// visible entre ellas; ahora es un grupo colapsable "archivo.mp4" con cada
+// subida (sitio, link, progreso) anidada debajo. El agrupamiento es puramente
+// por nombre -- no depende de que el archivo original siga en disco. ──
+
+function uploadGroupItemRow(job) {
   const pct = job.total_bytes > 0 ? Math.min(100, (job.bytes_sent / job.total_bytes) * 100) : (job.status === "done" ? 100 : 0);
-  const fillClass = job.status === "done" ? "done" : job.status === "error" ? "failed" : "";
-  const sizeLabel = job.total_bytes > 0 ? `${fmtBytes(job.bytes_sent)} / ${fmtBytes(job.total_bytes)}` : "";
-  return `<div class="upload-job">
-    <div class="upload-job-row">
-      <span class="upload-job-name">[${job.site}] ${job.source_name}${dest}</span>
-      <span class="badge ${job.status}">${STATUS_LABELS[job.status] || job.status}</span>
+  const dest = job.dest_folder_name ? ` → ${job.dest_folder_name}` : "";
+  const sub = job.url
+    ? `<a href="${job.url}" target="_blank" rel="noopener">${job.url}</a>`
+    : (job.error || (job.status === "uploading" ? `${fmtBytes(job.bytes_sent)} / ${fmtBytes(job.total_bytes)}` : ""));
+  return `<div class="upload-group-item">
+    <div class="upload-group-item-main">
+      <div class="upload-group-item-site">${job.site}${dest}</div>
+      <div class="upload-group-item-sub">${sub}</div>
     </div>
-    <div class="upload-job-sub">${created}${job.error ? " · " + job.error : ""}</div>
-    ${uploading || job.status === "done" ? `<div class="item">
-      <div class="item-sub">${sizeLabel}</div>
-      <div class="progress-bar"><div class="progress-fill ${fillClass}" style="width:${pct}%"></div></div>
-    </div>` : ""}
-    ${job.url ? `<div class="upload-job-link">
-      <a href="${job.url}" target="_blank" rel="noopener">${job.url}</a>
-      <button type="button" class="btn small" data-copy-link="${job.url}">📋 Copiar</button>
-    </div>` : ""}
-    ${job.status === "done" || job.status === "error" ? `<div class="upload-job-actions">
-      ${job.status === "error" ? `<button class="btn small" data-retry-upload="${job.id}">Reintentar</button>` : ""}
-      <button class="btn small" data-delete-upload="${job.id}">Borrar</button>
-    </div>` : ""}
+    <div class="upload-group-item-actions">
+      ${job.status === "uploading" ? `<div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>` : ""}
+      <span class="badge ${job.status}">${STATUS_LABELS[job.status] || job.status}</span>
+      ${job.url ? `<button type="button" class="btn small" data-action="copy-link" data-link="${job.url}">Copiar</button>` : ""}
+      ${job.status === "error" ? `<button type="button" class="btn small" data-action="retry-upload" data-id="${job.id}">Reintentar</button>` : ""}
+      ${(job.status === "done" || job.status === "error") ? `<button type="button" class="btn small" data-action="delete-upload" data-id="${job.id}">Borrar</button>` : ""}
+    </div>
   </div>`;
 }
+
+function uploadGroupCard(name, jobs) {
+  const hasActive = jobs.some((j) => j.status === "queued" || j.status === "uploading" || j.status === "error");
+  const override = state.uploadGroupOverride.get(name);
+  const open = override === undefined ? hasActive : override;
+  return `<div class="upload-group">
+    <button type="button" class="upload-group-head" data-action="toggle-group" data-group="${name}" aria-expanded="${open}">
+      <span><span class="upload-group-chevron">▸</span>${name}</span>
+      <span class="upload-group-count">${jobs.length} ${jobs.length === 1 ? "subida" : "subidas"}</span>
+    </button>
+    <div class="upload-group-body"${open ? "" : ` style="display:none"`}>
+      ${jobs.map(uploadGroupItemRow).join("")}
+    </div>
+  </div>`;
+}
+
+els.uploadJobsList.addEventListener("click", async (e) => {
+  const btn = e.target.closest("button[data-action]");
+  if (!btn) return;
+  const { action, group, link, id } = btn.dataset;
+  if (action === "toggle-group") {
+    const isOpen = btn.getAttribute("aria-expanded") === "true";
+    state.uploadGroupOverride.set(group, !isOpen);
+    refreshUploadJobs();
+  } else if (action === "copy-link") {
+    copyToClipboard(link, btn);
+  } else if (action === "retry-upload") {
+    btn.disabled = true;
+    try {
+      await fetchJSON(`/api/uploads/jobs/${id}/retry`, { method: "POST" });
+    } catch (err) {
+      alert(err.message);
+    }
+    refreshUploadJobs();
+  } else if (action === "delete-upload") {
+    try {
+      await fetch(`/api/uploads/jobs/${id}`, { method: "DELETE" });
+      refreshUploadJobs();
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+});
 
 async function refreshUploadJobs() {
   try {
     const jobs = await fetchJSON("/api/uploads/jobs");
-    const html = jobs.length ? jobs.map(uploadJobCard).join("") : `<p class="dim">Sin subidas todavía.</p>`;
-    if (!updateListHTML(els.uploadJobsList, "uploads", html)) return;
-    els.uploadJobsList.querySelectorAll("button[data-delete-upload]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        await fetch(`/api/uploads/jobs/${btn.dataset.deleteUpload}`, { method: "DELETE" });
-        refreshUploadJobs();
-      });
+    const groups = new Map();
+    for (const job of jobs) {
+      if (!groups.has(job.source_name)) groups.set(job.source_name, []);
+      groups.get(job.source_name).push(job);
+    }
+    for (const list of groups.values()) list.sort((a, b) => b.created_at - a.created_at);
+    const groupEntries = [...groups.entries()].sort((a, b) => {
+      const aMax = Math.max(...a[1].map((j) => j.created_at));
+      const bMax = Math.max(...b[1].map((j) => j.created_at));
+      return bMax - aMax;
     });
-    els.uploadJobsList.querySelectorAll("button[data-retry-upload]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        btn.disabled = true;
-        try {
-          await fetchJSON(`/api/uploads/jobs/${btn.dataset.retryUpload}/retry`, { method: "POST" });
-        } catch (err) {
-          alert(err.message);
-        }
-        refreshUploadJobs();
-      });
-    });
-    els.uploadJobsList.querySelectorAll("button[data-copy-link]").forEach((btn) => {
-      btn.addEventListener("click", () => copyToClipboard(btn.dataset.copyLink, btn));
-    });
+    const html = groupEntries.length
+      ? groupEntries.map(([name, list]) => uploadGroupCard(name, list)).join("")
+      : `<p class="dim">Sin subidas todavía.</p>`;
+    updateListHTML(els.uploadJobsList, "uploads", html);
   } catch (err) {
     els.uploadJobsList.innerHTML = `<p class="error-msg">${err.message}</p>`;
   }
@@ -939,191 +1060,11 @@ els.uploadClearFinished.addEventListener("click", async () => {
   refreshUploadJobs();
 });
 
-const VIDEO_CANCELLABLE = new Set(["queued", "running"]);
-const VIDEO_DELETABLE = new Set(["done", "error", "cancelled"]);
-
-function videoJobCard(job) {
-  const created = new Date(job.created_at * 1000).toLocaleString();
-  const pct = job.total > 0 ? Math.min(100, (job.bytes_done / job.total) * 100) : (job.status === "done" ? 100 : 0);
-  const fillClass = job.status === "done" ? "done" : job.status === "error" ? "failed" : "";
-  const speed = job.status === "running" ? fmtSpeed(job.speed_kb) : "";
-  const sizeLabel = job.total > 0 ? `${fmtBytes(job.bytes_done)} / ${fmtBytes(job.total)}` : "";
-  const logOpen = state.openVideoLogs.has(job.id);
-  const title = job.title || job.filename || job.url;
-  return `<div class="job" data-video-job="${job.id}">
-    <div class="job-head">
-      <div>
-        <div class="job-title">${title.length > 90 ? title.slice(0, 90) + "…" : title}</div>
-        <div class="job-meta">${created} · salida: ${job.output_dir}${engineLabel(job.engine) ? " · " + engineLabel(job.engine) : ""}${job.error ? " · " + job.error : ""}</div>
-      </div>
-      <span class="badge ${job.status}">${STATUS_LABELS[job.status] || job.status}</span>
-    </div>
-    <div class="item">
-      <div class="item-sub">${sizeLabel} ${speed ? "· " + speed : ""}</div>
-      <div class="progress-bar"><div class="progress-fill ${fillClass}" style="width:${pct}%"></div></div>
-    </div>
-    <div class="job-actions">
-      ${VIDEO_CANCELLABLE.has(job.status) ? `<button class="btn small danger" data-video-cancel="${job.id}" ${job.status === "cancelling" ? "disabled" : ""}>${job.status === "cancelling" ? "Cancelando…" : "Cancelar"}</button>` : ""}
-      ${VIDEO_DELETABLE.has(job.status) ? `<button class="btn small" data-video-delete="${job.id}">Borrar</button>` : ""}
-      <button class="btn small" data-video-toggle-log="${job.id}">${logOpen ? "Ocultar log" : "Ver log"}</button>
-    </div>
-    ${logOpen ? `<pre class="log" id="video-log-${job.id}">cargando…</pre>` : ""}
-  </div>`;
-}
-
-async function refreshVideoJobs() {
-  try {
-    const jobs = await fetchJSON("/api/ytdlp/jobs");
-    const html = jobs.length ? jobs.map(videoJobCard).join("") : `<p class="dim">Sin videos todavía.</p>`;
-    if (updateListHTML(els.videoJobsList, "videos", html)) {
-      els.videoJobsList.querySelectorAll("button[data-video-cancel]").forEach((btn) => {
-        btn.addEventListener("click", async () => {
-          btn.disabled = true;
-          await fetch(`/api/ytdlp/jobs/${btn.dataset.videoCancel}/cancel`, { method: "POST" });
-          refreshVideoJobs();
-        });
-      });
-      els.videoJobsList.querySelectorAll("button[data-video-delete]").forEach((btn) => {
-        btn.addEventListener("click", async () => {
-          if (!confirm("¿Borrar este video del historial? No afecta el archivo ya descargado.")) return;
-          await fetch(`/api/ytdlp/jobs/${btn.dataset.videoDelete}`, { method: "DELETE" });
-          refreshVideoJobs();
-        });
-      });
-      els.videoJobsList.querySelectorAll("button[data-video-toggle-log]").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          const id = btn.dataset.videoToggleLog;
-          if (state.openVideoLogs.has(id)) state.openVideoLogs.delete(id);
-          else state.openVideoLogs.add(id);
-          refreshVideoJobs();
-        });
-      });
-    }
-    for (const id of state.openVideoLogs) {
-      const pre = document.getElementById(`video-log-${id}`);
-      if (!pre) continue;
-      fetch(`/api/ytdlp/jobs/${id}/log`).then((r) => r.text()).then((text) => {
-        const wasAtBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 10;
-        pre.textContent = text || "(sin salida todavía)";
-        if (wasAtBottom) pre.scrollTop = pre.scrollHeight;
-      });
-    }
-  } catch (err) {
-    els.videoJobsList.innerHTML = `<p class="error-msg">${err.message}</p>`;
-  }
-}
-
-els.videoClearFinished.addEventListener("click", async () => {
-  await fetch("/api/ytdlp/clear-finished", { method: "POST" });
-  refreshVideoJobs();
-});
-
-// ── Videos (extensión): jobs creados por el userscript de Violentmonkey
-// (extras/violentmonkey/video-catcher.user.js) — ya viene con el video
-// elegido, así que acá solo se muestra el progreso de la descarga. ──
-
-function extensionItemProgress(item) {
-  const pct = item.total > 0 ? Math.min(100, (item.bytes_done / item.total) * 100) : (item.status === "done" ? 100 : 0);
-  const fillClass = item.status === "done" ? "done" : item.status === "failed" ? "failed" : "";
-  const speed = item.status === "running" ? fmtSpeed(item.speed_kb) : "";
-  const sizeLabel = item.total > 0 ? `${fmtBytes(item.bytes_done)} / ${fmtBytes(item.total)}` : fmtBytes(item.bytes_done);
-  return `<div class="item">
-    <div class="item-row">
-      <span class="item-name">${item.filename}</span>
-      <span class="badge ${item.status}">${STATUS_LABELS[item.status] || item.status}</span>
-    </div>
-    <div class="item-sub">${engineLabel(item.engine)} ${sizeLabel ? "· " + sizeLabel : ""} ${speed ? "· " + speed : ""} ${item.message ? "· " + item.message : ""}</div>
-    <div class="progress-bar"><div class="progress-fill ${fillClass}" style="width:${pct}%"></div></div>
-  </div>`;
-}
-
-const EXTENSION_CANCELLABLE = new Set(["queued", "downloading"]);
-const EXTENSION_DELETABLE = new Set(["done", "done_with_errors", "error", "cancelled"]);
-
-function extensionJobCard(job) {
-  const created = new Date(job.created_at * 1000).toLocaleString();
-  const title = job.page_url.length > 90 ? job.page_url.slice(0, 90) + "…" : job.page_url;
-  const itemsHtml = job.items && job.items.length ? job.items.map(extensionItemProgress).join("") : "";
-  return `<div class="job" data-extension-job="${job.id}">
-    <div class="job-head">
-      <div>
-        <div class="job-title">${title}</div>
-        <div class="job-meta">${created}${job.error ? " · " + job.error : ""}</div>
-      </div>
-      <span class="badge ${job.status}">${STATUS_LABELS[job.status] || job.status}</span>
-    </div>
-    <div class="items">${itemsHtml}</div>
-    <div class="job-actions">
-      ${EXTENSION_CANCELLABLE.has(job.status) ? `<button class="btn small danger" data-extension-cancel="${job.id}">Cancelar</button>` : ""}
-      ${EXTENSION_DELETABLE.has(job.status) ? `<button class="btn small" data-extension-delete="${job.id}">Borrar</button>` : ""}
-      <button class="btn small" data-extension-toggle-log="${job.id}">${state.openLogs.has(`extension-${job.id}`) ? "Ocultar log" : "Ver log"}</button>
-    </div>
-    ${state.openLogs.has(`extension-${job.id}`) ? `<pre class="log" id="extension-log-${job.id}">cargando…</pre>` : ""}
-  </div>`;
-}
-
-async function refreshExtensionJobs() {
-  try {
-    const jobs = await fetchJSON("/api/extension/jobs");
-    const html = jobs.length ? jobs.map(extensionJobCard).join("") : `<p class="dim">Sin videos todavía.</p>`;
-    if (updateListHTML(els.extensionJobsList, "extension", html)) {
-      els.extensionJobsList.querySelectorAll("button[data-extension-cancel]").forEach((btn) => {
-        btn.addEventListener("click", async () => {
-          btn.disabled = true;
-          await fetch(`/api/extension/jobs/${btn.dataset.extensionCancel}/cancel`, { method: "POST" });
-          refreshExtensionJobs();
-        });
-      });
-      els.extensionJobsList.querySelectorAll("button[data-extension-delete]").forEach((btn) => {
-        btn.addEventListener("click", async () => {
-          if (!confirm("¿Borrar este video del historial? No afecta los archivos ya descargados.")) return;
-          try {
-            await fetchJSON(`/api/extension/jobs/${btn.dataset.extensionDelete}`, { method: "DELETE" });
-            refreshExtensionJobs();
-          } catch (err) {
-            alert(err.message);
-          }
-        });
-      });
-      els.extensionJobsList.querySelectorAll("button[data-extension-toggle-log]").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          const key = `extension-${btn.dataset.extensionToggleLog}`;
-          if (state.openLogs.has(key)) state.openLogs.delete(key);
-          else state.openLogs.add(key);
-          refreshExtensionJobs();
-        });
-      });
-    }
-    for (const job of jobs) {
-      const key = `extension-${job.id}`;
-      if (!state.openLogs.has(key)) continue;
-      const pre = document.getElementById(`extension-log-${job.id}`);
-      if (!pre) continue;
-      fetch(`/api/extension/jobs/${job.id}/log`).then((r) => r.text()).then((text) => {
-        const wasAtBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 10;
-        pre.textContent = text || "(sin salida todavía)";
-        if (wasAtBottom) pre.scrollTop = pre.scrollHeight;
-      });
-    }
-  } catch (err) {
-    els.extensionJobsList.innerHTML = `<p class="error-msg">${err.message}</p>`;
-  }
-}
-
-els.extensionClearFinished.addEventListener("click", async () => {
-  await fetch("/api/extension/clear-finished", { method: "POST" });
-  refreshExtensionJobs();
-});
-
 refreshSites();
 refreshProxySources();
-refreshJobs();
+refreshActivity();
 refreshUploadSites();
 refreshUploadJobs();
-refreshVideoJobs();
-refreshExtensionJobs();
-setInterval(refreshJobs, 1500);
+setInterval(refreshActivity, 1500);
 setInterval(refreshUploadJobs, 2000);
-setInterval(refreshVideoJobs, 1500);
-setInterval(refreshExtensionJobs, 2000);
 setInterval(() => { if (state.filesOpen) loadFiles(state.filesPath); }, 5000);

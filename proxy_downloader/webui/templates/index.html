@@ -16,72 +16,99 @@
   </header>
 
   <main>
-    <section class="card" id="new-job-card">
-      <h2>Nueva descarga</h2>
-      <form id="job-form">
-        <div class="tabs">
-          <button type="button" class="tab active" data-kind="auto">Archivo / Carpeta</button>
-          <button type="button" class="tab" data-kind="batch">Batch</button>
-          <button type="button" class="tab" data-kind="video">Video (yt-dlp)</button>
-          <button type="button" class="tab" data-kind="upload">Subir</button>
-        </div>
+    <div class="dashboard-grid">
+      <aside class="sidebar">
+        <section class="card" id="new-job-card">
+          <h2>Nueva descarga</h2>
+          <form id="job-form">
+            <div class="tabs">
+              <button type="button" class="tab active" data-kind="auto">Archivo / Carpeta</button>
+              <button type="button" class="tab" data-kind="batch">Batch</button>
+              <button type="button" class="tab" data-kind="video">Video (yt-dlp)</button>
+              <button type="button" class="tab" data-kind="upload">Subir</button>
+            </div>
 
-        <div class="field" id="field-single">
-          <label for="value-single">URL o ID — se detecta solo si es archivo o carpeta</label>
-          <input type="text" id="value-single" placeholder="https://pixeldrain.com/u/XXXXXXX (o /l/XXXXXXX para una carpeta)">
-        </div>
+            <div class="field" id="field-single">
+              <label for="value-single">URL o ID — se detecta solo si es archivo o carpeta</label>
+              <input type="text" id="value-single" placeholder="https://pixeldrain.com/u/XXXXXXX (o /l/XXXXXXX para una carpeta)">
+            </div>
 
-        <div class="field hidden" id="field-video">
-          <label for="value-video">URL del video (o playlist) — YouTube, Twitter/X, Instagram, TikTok, Reddit, Twitch y varios cientos más</label>
-          <input type="text" id="value-video" placeholder="https://www.youtube.com/watch?v=XXXXXXXXXXX">
-          <span class="field-hint">Motor aparte (yt-dlp): sin rotación de proxy, usa a lo sumo uno fijo para toda la descarga.</span>
-        </div>
+            <div class="field hidden" id="field-video">
+              <label for="value-video">URL del video (o playlist) — YouTube, Twitter/X, Instagram, TikTok, Reddit, Twitch y varios cientos más</label>
+              <input type="text" id="value-video" placeholder="https://www.youtube.com/watch?v=XXXXXXXXXXX">
+              <span class="field-hint">Motor aparte (yt-dlp): sin rotación de proxy, usa a lo sumo uno fijo para toda la descarga.</span>
+            </div>
 
-        <div class="field hidden" id="field-batch">
-          <label for="value-batch">Una URL/ID por línea (soporta líneas <code>folder: nombre</code>)</label>
-          <textarea id="value-batch" rows="8" placeholder="folder: fotos de perritos
+            <div class="field hidden" id="field-batch">
+              <label for="value-batch">Una URL/ID por línea (soporta líneas <code>folder: nombre</code>)</label>
+              <textarea id="value-batch" rows="8" placeholder="folder: fotos de perritos
 https://pixeldrain.com/u/XXXXXXX
 https://www.mediafire.com/file/XXXXXXX/nombre/file
 
 folder:
 https://1fichier.com/?XXXXXXXXX"></textarea>
-        </div>
+            </div>
 
-        <div class="field hidden" id="field-upload">
-          <label>Sitios destino — subís el mismo archivo a todos los que marques</label>
-          <div id="upload-site-checks" class="upload-site-checks"></div>
-          <div id="upload-account-blocks"></div>
+            <div class="field hidden" id="field-upload">
+              <label>Sitios destino — subís el mismo archivo a todos los que marques</label>
+              <div id="upload-site-checks" class="upload-site-checks"></div>
+              <div id="upload-account-blocks"></div>
 
-          <label for="upload-file-input">Archivo(s) desde este dispositivo</label>
-          <input type="file" id="upload-file-input" multiple>
-          <div id="upload-selected-existing" class="hidden field-hint"></div>
-          <span class="error-msg" id="upload-form-error"></span>
-        </div>
+              <label for="upload-file-input">Archivo(s) desde este dispositivo</label>
+              <input type="file" id="upload-file-input" multiple>
+              <div id="upload-selected-existing" class="hidden field-hint"></div>
+              <span class="error-msg" id="upload-form-error"></span>
+            </div>
 
-        <div class="field-row" id="download-options-row">
-          <div class="field">
-            <label for="output-dir">Carpeta de salida</label>
-            <input type="text" id="output-dir" placeholder="{{ default_output_dir }}">
+            <div class="field-row" id="download-options-row">
+              <div class="field">
+                <label for="output-dir">Carpeta de salida</label>
+                <input type="text" id="output-dir" placeholder="{{ default_output_dir }}">
+              </div>
+              <div class="field">
+                <label for="proxy-mode">Proxy</label>
+                <select id="proxy-mode">
+                  <option value="auto">Auto (según el sitio)</option>
+                  <option value="proxy">Forzar proxy</option>
+                  <option value="no-proxy">Sin proxy</option>
+                </select>
+              </div>
+              <div class="field" id="field-min-speed">
+                <label for="min-speed">Velocidad mínima (KB/s)</label>
+                <input type="number" id="min-speed" placeholder="1500">
+                <span class="field-hint">Solo aplica con proxy: si un proxy baja de esto, rota a otro</span>
+              </div>
+            </div>
+
+            <button type="submit" class="btn primary" id="submit-btn">Descargar</button>
+            <span id="form-error" class="error-msg"></span>
+          </form>
+        </section>
+      </aside>
+
+      <div class="main-content">
+        <section class="card" id="activity-card">
+          <div class="card-head-row">
+            <h2>Actividad</h2>
+            <button type="button" class="btn small" id="activity-clear-finished">limpiar completados</button>
           </div>
-          <div class="field">
-            <label for="proxy-mode">Proxy</label>
-            <select id="proxy-mode">
-              <option value="auto">Auto (según el sitio)</option>
-              <option value="proxy">Forzar proxy</option>
-              <option value="no-proxy">Sin proxy</option>
-            </select>
+          <div class="chip-row" id="activity-filters">
+            <button type="button" class="chip active" data-filter="all">Todos</button>
+            <button type="button" class="chip" data-filter="jobs">Archivos</button>
+            <button type="button" class="chip" data-filter="video">Videos</button>
           </div>
-          <div class="field" id="field-min-speed">
-            <label for="min-speed">Velocidad mínima (KB/s)</label>
-            <input type="number" id="min-speed" placeholder="1500">
-            <span class="field-hint">Solo aplica con proxy: si un proxy baja de esto, rota a otro</span>
-          </div>
-        </div>
+          <div id="activity-list"><p class="dim">Sin actividad todavía.</p></div>
+        </section>
 
-        <button type="submit" class="btn primary" id="submit-btn">Descargar</button>
-        <span id="form-error" class="error-msg"></span>
-      </form>
-    </section>
+        <section class="card" id="uploads-card">
+          <div class="card-head-row">
+            <h2>Subidas</h2>
+            <button type="button" class="btn small" id="upload-clear-finished">limpiar completados</button>
+          </div>
+          <div id="upload-jobs-list"><p class="dim">Sin subidas todavía.</p></div>
+        </section>
+      </div>
+    </div>
 
     <section class="card" id="sites-card">
       <h2>Sitios <button type="button" class="btn small" id="toggle-sites">mostrar/ocultar</button></h2>
@@ -159,34 +186,6 @@ https://1fichier.com/?XXXXXXXXX"></textarea>
         <div id="files-breadcrumb" class="breadcrumb"></div>
         <div id="files-list"></div>
       </div>
-    </section>
-
-    <section class="card">
-      <h2>Subidas
-        <button type="button" class="btn small" id="upload-clear-finished">limpiar completados</button>
-      </h2>
-      <div id="upload-jobs-list"><p class="dim">Sin subidas todavía.</p></div>
-    </section>
-
-    <section class="card">
-      <h2>Videos (yt-dlp)
-        <button type="button" class="btn small" id="video-clear-finished">limpiar completados</button>
-      </h2>
-      <div id="video-jobs-list"><p class="dim">Sin videos todavía.</p></div>
-    </section>
-
-    <section class="card">
-      <h2>Videos (extensión)
-        <button type="button" class="btn small" id="extension-clear-finished">limpiar completados</button>
-      </h2>
-      <div id="extension-jobs-list"><p class="dim">Sin videos todavía.</p></div>
-    </section>
-
-    <section class="card">
-      <h2>Trabajos
-        <button type="button" class="btn small" id="clear-finished">limpiar completados</button>
-      </h2>
-      <div id="jobs-list"><p class="dim">Sin trabajos todavía.</p></div>
     </section>
   </main>
 
