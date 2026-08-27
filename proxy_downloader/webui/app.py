@@ -381,6 +381,12 @@ def api_create_upload_folder_jobs():
     if not local_files:
         return jsonify({"error": "La carpeta está vacía"}), 400
 
+    # Defaults to the local folder's own name, but the UI lets the user
+    # override it -- this is only what gets used for a *newly created*
+    # destination folder (guest or real-account); a site where an existing
+    # folder was picked instead (choice["folder_id"] below) ignores it.
+    new_folder_name = (data.get("folder_name") or "").strip() or folder_path.name
+
     configured = {s["site"]: s["configured"] for s in upload_manager.list_upload_sites()}
     # Every job from this one request shares this batch id/label -- the N
     # files are N different source_names, which on their own would each
@@ -388,7 +394,7 @@ def api_create_upload_folder_jobs():
     # source_name, for the *other* case of one file going to several
     # sites); this is what lets the UI cluster them into one group instead.
     batch_id = uuid.uuid4().hex[:12]
-    batch_label = folder_path.name
+    batch_label = new_folder_name
 
     created = []
     errors = []
@@ -404,10 +410,10 @@ def api_create_upload_folder_jobs():
         try:
             if info["has_folders"] and not folder_id:
                 if info.get("create_guest_token") and not configured.get(site):
-                    guest = upload_manager.create_guest_folder(site, folder_path.name)
+                    guest = upload_manager.create_guest_folder(site, new_folder_name)
                     guest_token, folder_id, folder_name = guest["token"], guest["folder_id"], guest["folder_name"]
                 else:
-                    created_folder = upload_manager.create_folder(site, folder_path.name)
+                    created_folder = upload_manager.create_folder(site, new_folder_name)
                     folder_id, folder_name = created_folder["id"], created_folder["name"]
         except (ValueError, upload_sites.UploadError) as e:
             errors.append(f"{info['label']}: {e}")

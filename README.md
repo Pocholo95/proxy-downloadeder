@@ -377,15 +377,19 @@ Cada fila de carpeta en "Archivos" tiene su propio botón **"⬆ Subir
 carpeta"** (junto al de cada archivo suelto) — sube todo lo que hay adentro
 (no recursivo) a los sitios que tildes, agrupado en **una sola carpeta
 destino por sitio** en vez de que cada archivo termine desperdigado en su
-propio link suelto. Para un sitio con cuenta configurada, usa la carpeta
-que hayas elegido/creado en su bloque de arriba, igual que una subida
-normal. Para Gofile **sin cuenta**, arma sola una carpeta temporal
-anónima — crea una cuenta invitada al vuelo (mismo mecanismo que ya usa
-cualquier subida anónima a Gofile por debajo, solo que acá se pide
-explícitamente antes de subir nada, para poder nombrar la carpeta y
-reusar esa misma cuenta invitada en los N archivos) y sube todo ahí. Sin
-login en ningún momento — Bunkr/Filester no tienen equivalente porque
-esos sí exigen cuenta real para tener carpetas, punto.
+propio link suelto. Trae un campo para el **nombre de la carpeta destino**
+(precargado con el nombre de la carpeta local, editable) — se usa en
+cualquier sitio donde no hayas elegido de antemano una carpeta ya
+existente; donde sí elegiste una, esa elección manda y el campo no aplica.
+Para un sitio con cuenta configurada, usa esa carpeta (existente o recién
+creada con ese nombre) igual que una subida normal. Para Gofile **sin
+cuenta**, arma sola una carpeta temporal anónima con ese nombre — crea una
+cuenta invitada al vuelo (mismo mecanismo que ya usa cualquier subida
+anónima a Gofile por debajo, solo que acá se pide explícitamente antes de
+subir nada, para poder nombrarla y reusar esa misma cuenta invitada en los
+N archivos) y sube todo ahí. Sin login en ningún momento — Bunkr/Filester
+no tienen equivalente porque esos sí exigen cuenta real para tener
+carpetas, punto.
 
 El historial de "Subidas" agrupa por esta subida-de-carpeta (ícono 📁,
 nombre = el de la carpeta local) en vez de por archivo individual como

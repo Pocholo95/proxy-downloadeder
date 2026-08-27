@@ -110,6 +110,10 @@ els.activityClearFinished.addEventListener("click", async () => {
   refreshActivity();
 });
 
+function escapeAttr(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 function fmtBytes(n) {
   if (!n || n <= 0) return "0 KB";
   const kb = n / 1024;
@@ -725,22 +729,32 @@ document.addEventListener("keydown", (e) => {
 // ── Uploads (multi-site: same file(s) to every site you check) ─────────────
 
 function renderUploadSelectedExisting() {
-  let html = "";
   if (state.uploadSelectedFolder) {
-    html = `Vas a subir la carpeta: <strong>${state.uploadSelectedFolder.name}</strong> (todos sus archivos) `;
-  } else if (state.uploadSelectedExisting) {
-    html = `Vas a subir: <strong>${state.uploadSelectedExisting.name}</strong> (ya descargado) `;
-  } else {
+    els.uploadSelectedExistingEl.classList.remove("hidden");
+    els.uploadSelectedExistingEl.innerHTML =
+      `Vas a subir la carpeta: <strong>${state.uploadSelectedFolder.name}</strong> (todos sus archivos) ` +
+      `<button type="button" class="btn small" id="upload-selected-clear">quitar</button>` +
+      `<div class="field" style="margin-top:8px;">` +
+      `<label for="upload-folder-name-input">Nombre de la carpeta destino (donde no hayas elegido una existente)</label>` +
+      `<input type="text" id="upload-folder-name-input" value="${escapeAttr(state.uploadSelectedFolder.name)}">` +
+      `</div>`;
+    document.getElementById("upload-selected-clear").addEventListener("click", () => {
+      state.uploadSelectedFolder = null;
+      renderUploadSelectedExisting();
+    });
+    return;
+  }
+  if (!state.uploadSelectedExisting) {
     els.uploadSelectedExistingEl.classList.add("hidden");
     els.uploadSelectedExistingEl.innerHTML = "";
     return;
   }
   els.uploadSelectedExistingEl.classList.remove("hidden");
   els.uploadSelectedExistingEl.innerHTML =
-    html + `<button type="button" class="btn small" id="upload-selected-clear">quitar</button>`;
+    `Vas a subir: <strong>${state.uploadSelectedExisting.name}</strong> (ya descargado) ` +
+    `<button type="button" class="btn small" id="upload-selected-clear">quitar</button>`;
   document.getElementById("upload-selected-clear").addEventListener("click", () => {
     state.uploadSelectedExisting = null;
-    state.uploadSelectedFolder = null;
     renderUploadSelectedExisting();
   });
 }
@@ -943,10 +957,12 @@ async function submitUpload() {
           : null;
         return { site: info.site, folder_id: folderId, folder_name: folderName };
       });
+      const nameInput = document.getElementById("upload-folder-name-input");
+      const newFolderName = (nameInput ? nameInput.value : "").trim() || state.uploadSelectedFolder.name;
       const result = await fetchJSON("/api/uploads/folder-jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: state.uploadSelectedFolder.path, sites: sitesPayload }),
+        body: JSON.stringify({ path: state.uploadSelectedFolder.path, folder_name: newFolderName, sites: sitesPayload }),
       });
       if (result.errors && result.errors.length) {
         els.uploadFormError.textContent = result.errors.join("; ");
