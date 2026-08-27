@@ -250,6 +250,21 @@ La paleta/tipografía/tarjetas de la UI están tomadas del tema "classic"
 mismo radio/sombras, traducidos a CSS plano en `static/style.css` ya que
 esta UI no tiene build step (HTML+JS vanilla, sin React/Tailwind).
 
+La interfaz está armada como un gestor de descargas de escritorio
+(jDownloader/qBittorrent) en vez de tarjetas apiladas en una sola página
+larga: sidebar de categorías a la izquierda (por sitio, por estado, o las
+vistas "Archivos"/"Sitios y proxies"), tabla única de tareas al centro con
+selección múltiple y acciones en lote, y una barra de estado abajo con
+velocidad/contadores en vivo. Los 4 motores de descarga/subida (sitios,
+yt-dlp, extensión, subidas) se normalizan a una sola fila cada uno en vez
+de vivir en secciones separadas — un job de carpeta/batch con varios
+archivos, o una subida en lote a una carpeta remota, aparece como una fila
+colapsable con una flecha ▸ que despliega sus archivos individuales sin
+ocupar toda la pantalla de entrada. El formulario para agregar una
+descarga pasó de estar siempre visible en una sidebar fija a un modal
+("Agregar descarga", mismas 4 pestañas de antes: Archivo/Carpeta, Batch,
+Video, Subir) — se abre con el botón "Agregar" de la barra superior.
+
 Interfaz web sobre el mismo motor de descarga: pegás una URL (o una carpeta,
 o un batch de varias líneas), elegís carpeta de salida y modo de proxy, y
 seguís el progreso de cada archivo desde el navegador. Corre siempre un
@@ -288,7 +303,7 @@ queda igual de bien, solo sin este empujoncito.
 
 ### Video (yt-dlp)
 
-Cuarta pestaña de "Nueva descarga": pegás la URL de un video (o playlist)
+Una de las pestañas del modal "Agregar descarga": pegás la URL de un video (o playlist)
 de YouTube, Twitter/X, Instagram, TikTok, Reddit, Twitch y varios cientos
 de sitios más que soporta [yt-dlp](https://github.com/yt-dlp/yt-dlp), y lo
 descarga con el mejor video+audio disponible, mezclándolos a `.mp4` con
@@ -352,8 +367,8 @@ lo que sea que venga.
 
 ### Subir archivos
 
-Es la tercera pestaña de "Nueva descarga" (junto a "Archivo / Carpeta" y
-"Batch"): **Subir**. Marcás uno o más sitios destino —**Gofile**, **Bunkr**,
+Es una de las pestañas del modal "Agregar descarga" (junto a "Archivo /
+Carpeta", "Batch" y "Video"): **Subir**. Marcás uno o más sitios destino —**Gofile**, **Bunkr**,
 **Filester** y/o **FileDitch**— y sube el mismo archivo a todos los que
 tildaste en un solo click; source es un archivo ya descargado (botón "⬆
 Subir" en cada fila de "Archivos", que te lleva directo a esta pestaña con

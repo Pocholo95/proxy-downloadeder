@@ -7,187 +7,223 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-  <header>
-    <div class="header-icon">📥</div>
-    <div>
-      <h1>Proxy Downloader</h1>
-      <p class="subtitle">Rotación de proxies · resume · batch · carpetas</p>
+  <div class="shell">
+    <div class="topbar">
+      <div class="brand">
+        <div class="brand-mark">⇩</div>
+        <div class="brand-name">Proxy Downloader</div>
+      </div>
+      <button type="button" class="tbtn primary" id="btn-add">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>
+        Agregar
+      </button>
+      <div class="tb-sep"></div>
+      <button type="button" class="tbtn ghost" id="btn-cancel-active" title="Cancela toda descarga/video/extensión activa o en cola (las subidas no se pueden cancelar una vez iniciadas)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        Cancelar activos
+      </button>
+      <button type="button" class="tbtn ghost" id="btn-clear">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>
+        Limpiar completados
+      </button>
+      <div class="tb-spacer"></div>
+      <div class="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" id="search-input" placeholder="Buscar por nombre o sitio…">
+      </div>
     </div>
-  </header>
 
-  <main>
-    <div class="dashboard-grid">
-      <aside class="sidebar">
-        <section class="card" id="new-job-card">
-          <h2>Nueva descarga</h2>
-          <form id="job-form">
-            <div class="tabs">
-              <button type="button" class="tab active" data-kind="auto">Archivo / Carpeta</button>
-              <button type="button" class="tab" data-kind="batch">Batch</button>
-              <button type="button" class="tab" data-kind="video">Video (yt-dlp)</button>
-              <button type="button" class="tab" data-kind="upload">Subir</button>
+    <div class="sidebar" id="sidebar"></div>
+
+    <div class="main">
+      <div class="view-head">
+        <h2 id="view-title">Todo</h2>
+        <span class="sub" id="view-sub"></span>
+        <div class="tb-spacer"></div>
+        <button type="button" class="tbtn ghost" id="refresh-files-btn" style="display:none;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 4v5h5M20 20v-5h-5"/><path d="M5.5 9a7 7 0 0 1 12.3-2.5M18.5 15a7 7 0 0 1-12.3 2.5"/></svg>
+          Actualizar
+        </button>
+      </div>
+      <div class="bulk-bar" id="bulk-bar">
+        <span><span class="count" id="bulk-count">0</span> seleccionadas</span>
+        <div class="tb-spacer"></div>
+        <button type="button" class="tbtn ghost" id="bulk-retry"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 4v5h5M20 20v-5h-5"/><path d="M5.5 9a7 7 0 0 1 12.3-2.5M18.5 15a7 7 0 0 1-12.3 2.5"/></svg>Reintentar</button>
+        <button type="button" class="tbtn ghost" id="bulk-cancel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6 6 18"/></svg>Cancelar</button>
+        <button type="button" class="tbtn ghost" id="bulk-delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>Quitar</button>
+      </div>
+
+      <div class="table-wrap" id="table-view">
+        <table>
+          <thead>
+            <tr>
+              <th class="chk-col"><input type="checkbox" id="chk-all"></th>
+              <th>Nombre</th>
+              <th>Sitio</th>
+              <th>Progreso</th>
+              <th class="num-col">Velocidad</th>
+              <th class="num-col">Tamaño</th>
+              <th>Estado</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="task-body"></tbody>
+        </table>
+      </div>
+
+      <div class="view-panel" id="files-view" style="display:none;">
+        <div id="files-breadcrumb" class="breadcrumb"></div>
+        <div id="files-list"></div>
+      </div>
+
+      <div class="view-panel" id="sites-view" style="display:none;">
+        <div class="settings-block">
+          <div class="settings-block-head">
+            <h3>Sitios</h3>
+            <span class="dim">Forzá o desactivá el uso de proxy por sitio (por defecto, cada uno usa lo que le conviene).</span>
+          </div>
+          <div id="sites-list"></div>
+        </div>
+        <div class="settings-block">
+          <div class="settings-block-head">
+            <h3>Fuentes de proxy</h3>
+            <span class="dim">Lista pública (URL de texto plano) o gateway autenticado (proxy pago, tipo Decodo).</span>
+          </div>
+          <div id="proxy-sources-list"></div>
+
+          <div class="field-row" style="margin-top:14px;">
+            <div class="field">
+              <label for="ps-type">Tipo</label>
+              <select id="ps-type">
+                <option value="list">Lista pública (URL)</option>
+                <option value="gateway">Gateway autenticado</option>
+              </select>
             </div>
-
-            <div class="field" id="field-single">
-              <label for="value-single">URL o ID — se detecta solo si es archivo o carpeta</label>
-              <input type="text" id="value-single" placeholder="https://pixeldrain.com/u/XXXXXXX (o /l/XXXXXXX para una carpeta)">
+            <div class="field">
+              <label for="ps-name">Nombre</label>
+              <input type="text" id="ps-name" placeholder="Mi lista / Decodo">
             </div>
-
-            <div class="field hidden" id="field-video">
-              <label for="value-video">URL del video (o playlist) — YouTube, Twitter/X, Instagram, TikTok, Reddit, Twitch y varios cientos más</label>
-              <input type="text" id="value-video" placeholder="https://www.youtube.com/watch?v=XXXXXXXXXXX">
-              <span class="field-hint">Motor aparte (yt-dlp): sin rotación de proxy, usa a lo sumo uno fijo para toda la descarga.</span>
+          </div>
+          <div class="field-row" id="ps-fields-list">
+            <div class="field">
+              <label for="ps-url">URL de la lista (un proxy por línea)</label>
+              <input type="text" id="ps-url" placeholder="https://.../proxies.txt">
             </div>
+          </div>
+          <div class="field-row hidden" id="ps-fields-gateway">
+            <div class="field">
+              <label for="ps-scheme">Esquema</label>
+              <select id="ps-scheme">
+                <option value="http">http</option>
+                <option value="https">https</option>
+                <option value="socks5">socks5</option>
+                <option value="socks4">socks4</option>
+              </select>
+            </div>
+            <div class="field"><label for="ps-host">Host</label><input type="text" id="ps-host" placeholder="gate.decodo.com"></div>
+            <div class="field"><label for="ps-port">Puerto</label><input type="number" id="ps-port" placeholder="7000"></div>
+            <div class="field"><label for="ps-username">Usuario</label><input type="text" id="ps-username"></div>
+            <div class="field"><label for="ps-password">Contraseña</label><input type="password" id="ps-password"></div>
+          </div>
+          <button type="button" class="tbtn primary" id="ps-add-btn">Agregar fuente</button>
+          <span class="error-msg" id="ps-error"></span>
+        </div>
+      </div>
+    </div>
 
-            <div class="field hidden" id="field-batch">
-              <label for="value-batch">Una URL/ID por línea (soporta líneas <code>folder: nombre</code>)</label>
-              <textarea id="value-batch" rows="8" placeholder="folder: fotos de perritos
+    <div class="statusbar">
+      <div class="sb-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 3v13M6 11l6 6 6-6"/></svg>
+        <span class="sb-dl num" id="sb-dlspeed">0 KB/s</span></div>
+      <div class="sb-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 21V8M6 13l6-6 6 6"/></svg>
+        <span class="sb-ul num" id="sb-ulspeed">0 KB/s</span></div>
+      <div class="tb-sep"></div>
+      <div class="sb-item">activos <b class="num" id="sb-active">0</b></div>
+      <div class="sb-item">en cola <b class="num" id="sb-queued">0</b></div>
+      <div class="sb-item">completados <b class="num" id="sb-done">0</b></div>
+      <div class="sb-item">con error <b class="num" id="sb-error">0</b></div>
+      <div class="sb-spacer"></div>
+      <div class="sb-item" id="sb-status-msg"></div>
+    </div>
+  </div>
+
+  <!-- Add-task modal -->
+  <div class="modal-backdrop" id="modal-backdrop">
+    <div class="modal">
+      <div class="modal-head">
+        <h3>Agregar descarga</h3>
+        <button type="button" class="modal-close" id="modal-close" aria-label="Cerrar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+      <div class="modal-tabs" id="modal-tabs">
+        <button type="button" class="mtab active" data-kind="auto">Archivo / Carpeta</button>
+        <button type="button" class="mtab" data-kind="batch">Batch</button>
+        <button type="button" class="mtab" data-kind="video">Video (yt-dlp)</button>
+        <button type="button" class="mtab" data-kind="upload">Subir</button>
+      </div>
+      <form id="job-form">
+        <div class="modal-body">
+          <div class="field" id="field-single">
+            <label for="value-single">URL o ID — se detecta solo si es archivo o carpeta</label>
+            <input type="text" id="value-single" placeholder="https://pixeldrain.com/u/XXXXXXX (o /l/XXXXXXX para una carpeta)">
+          </div>
+
+          <div class="field hidden" id="field-video">
+            <label for="value-video">URL del video (o playlist)</label>
+            <input type="text" id="value-video" placeholder="https://www.youtube.com/watch?v=XXXXXXXXXXX">
+            <span class="field-hint">Motor aparte (yt-dlp): YouTube, Twitter/X, Instagram, TikTok, Reddit, Twitch y varios cientos más. Sin rotación de proxy, usa a lo sumo uno fijo para toda la descarga.</span>
+          </div>
+
+          <div class="field hidden" id="field-batch">
+            <label for="value-batch">Una URL/ID por línea (soporta líneas <code>folder: nombre</code>)</label>
+            <textarea id="value-batch" rows="7" placeholder="folder: fotos de perritos
 https://pixeldrain.com/u/XXXXXXX
 https://www.mediafire.com/file/XXXXXXX/nombre/file
 
 folder:
 https://1fichier.com/?XXXXXXXXX"></textarea>
-            </div>
-
-            <div class="field hidden" id="field-upload">
-              <label>Sitios destino — subís el mismo archivo a todos los que marques</label>
-              <div id="upload-site-checks" class="upload-site-checks"></div>
-              <div id="upload-account-blocks"></div>
-
-              <label for="upload-file-input">Archivo(s) desde este dispositivo</label>
-              <input type="file" id="upload-file-input" multiple>
-              <div id="upload-selected-existing" class="hidden field-hint"></div>
-              <span class="error-msg" id="upload-form-error"></span>
-            </div>
-
-            <div class="field-row" id="download-options-row">
-              <div class="field">
-                <label for="output-dir">Carpeta de salida</label>
-                <input type="text" id="output-dir" placeholder="{{ default_output_dir }}">
-              </div>
-              <div class="field">
-                <label for="proxy-mode">Proxy</label>
-                <select id="proxy-mode">
-                  <option value="auto">Auto (según el sitio)</option>
-                  <option value="proxy">Forzar proxy</option>
-                  <option value="no-proxy">Sin proxy</option>
-                </select>
-              </div>
-              <div class="field" id="field-min-speed">
-                <label for="min-speed">Velocidad mínima (KB/s)</label>
-                <input type="number" id="min-speed" placeholder="1500">
-                <span class="field-hint">Solo aplica con proxy: si un proxy baja de esto, rota a otro</span>
-              </div>
-            </div>
-
-            <button type="submit" class="btn primary" id="submit-btn">Descargar</button>
-            <span id="form-error" class="error-msg"></span>
-          </form>
-        </section>
-      </aside>
-
-      <div class="main-content">
-        <section class="card" id="activity-card">
-          <div class="card-head-row">
-            <h2>Actividad</h2>
-            <button type="button" class="btn small" id="activity-clear-finished">limpiar completados</button>
           </div>
-          <div class="chip-row" id="activity-filters">
-            <button type="button" class="chip active" data-filter="all">Todos</button>
-            <button type="button" class="chip" data-filter="jobs">Archivos</button>
-            <button type="button" class="chip" data-filter="video">Videos</button>
-          </div>
-          <div id="activity-list"><p class="dim">Sin actividad todavía.</p></div>
-        </section>
 
-        <section class="card" id="uploads-card">
-          <div class="card-head-row">
-            <h2>Subidas</h2>
-            <button type="button" class="btn small" id="upload-clear-finished">limpiar completados</button>
+          <div class="field hidden" id="field-upload">
+            <label>Sitios destino — subís el mismo archivo a todos los que marques</label>
+            <div id="upload-site-checks" class="upload-site-checks"></div>
+            <div id="upload-account-blocks"></div>
+
+            <label for="upload-file-input">Archivo(s) desde este dispositivo</label>
+            <input type="file" id="upload-file-input" multiple>
+            <div id="upload-selected-existing" class="hidden field-hint"></div>
+            <span class="error-msg" id="upload-form-error"></span>
           </div>
-          <div id="upload-jobs-list"><p class="dim">Sin subidas todavía.</p></div>
-        </section>
-      </div>
+
+          <div class="field-row" id="download-options-row">
+            <div class="field">
+              <label for="output-dir">Carpeta de salida</label>
+              <input type="text" id="output-dir" placeholder="{{ default_output_dir }}">
+            </div>
+            <div class="field">
+              <label for="proxy-mode">Proxy</label>
+              <select id="proxy-mode">
+                <option value="auto">Auto (según el sitio)</option>
+                <option value="proxy">Forzar proxy</option>
+                <option value="no-proxy">Sin proxy</option>
+              </select>
+            </div>
+            <div class="field" id="field-min-speed">
+              <label for="min-speed">Velocidad mínima (KB/s)</label>
+              <input type="number" id="min-speed" placeholder="1500">
+              <span class="field-hint">Solo con proxy: si uno baja de esto, rota a otro.</span>
+            </div>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <span class="error-msg" id="form-error"></span>
+          <div class="tb-spacer"></div>
+          <button type="button" class="tbtn ghost big" id="modal-cancel">Cancelar</button>
+          <button type="submit" class="tbtn primary big" id="submit-btn">Descargar</button>
+        </div>
+      </form>
     </div>
-
-    <section class="card" id="sites-card">
-      <h2>Sitios <button type="button" class="btn small" id="toggle-sites">mostrar/ocultar</button></h2>
-      <div id="sites-list" class="hidden"></div>
-    </section>
-
-    <section class="card" id="proxy-sources-card">
-      <h2>Fuentes de proxy
-        <button type="button" class="btn small" id="toggle-proxy-sources">mostrar/ocultar</button>
-      </h2>
-      <div id="proxy-sources-panel" class="hidden">
-        <div id="proxy-sources-list"></div>
-
-        <h4 style="margin:16px 0 10px;">Agregar fuente</h4>
-        <div class="field-row">
-          <div class="field">
-            <label for="ps-type">Tipo</label>
-            <select id="ps-type">
-              <option value="list">Lista pública (URL)</option>
-              <option value="gateway">Gateway autenticado (proxy pago — Decodo y similares)</option>
-            </select>
-          </div>
-          <div class="field">
-            <label for="ps-name">Nombre</label>
-            <input type="text" id="ps-name" placeholder="Mi lista / Decodo">
-          </div>
-        </div>
-
-        <div class="field-row" id="ps-fields-list">
-          <div class="field">
-            <label for="ps-url">URL de la lista (texto plano, un proxy por línea)</label>
-            <input type="text" id="ps-url" placeholder="https://.../proxies.txt">
-          </div>
-        </div>
-
-        <div class="field-row hidden" id="ps-fields-gateway">
-          <div class="field">
-            <label for="ps-scheme">Esquema</label>
-            <select id="ps-scheme">
-              <option value="http">http</option>
-              <option value="https">https</option>
-              <option value="socks5">socks5</option>
-              <option value="socks4">socks4</option>
-            </select>
-          </div>
-          <div class="field">
-            <label for="ps-host">Host</label>
-            <input type="text" id="ps-host" placeholder="gate.decodo.com">
-          </div>
-          <div class="field">
-            <label for="ps-port">Puerto</label>
-            <input type="number" id="ps-port" placeholder="7000">
-          </div>
-          <div class="field">
-            <label for="ps-username">Usuario</label>
-            <input type="text" id="ps-username">
-          </div>
-          <div class="field">
-            <label for="ps-password">Contraseña</label>
-            <input type="password" id="ps-password">
-          </div>
-        </div>
-
-        <button type="button" class="btn" id="ps-add-btn">Agregar fuente</button>
-        <span class="error-msg" id="ps-error"></span>
-      </div>
-    </section>
-
-    <section class="card" id="files-card">
-      <h2>Archivos
-        <button type="button" class="btn small" id="toggle-files">mostrar/ocultar</button>
-        <button type="button" class="btn small hidden" id="refresh-files">↻ actualizar</button>
-      </h2>
-      <div id="files-panel" class="hidden">
-        <div id="files-breadcrumb" class="breadcrumb"></div>
-        <div id="files-list"></div>
-      </div>
-    </section>
-  </main>
+  </div>
 
   <div id="preview-modal" class="preview-modal hidden">
     <div class="preview-modal-inner">
