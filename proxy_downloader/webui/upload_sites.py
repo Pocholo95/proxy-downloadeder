@@ -173,7 +173,19 @@ def gofile_list_folders(token, root_folder_id):
 def gofile_create_folder(token, parent_id, name):
     data = _gofile_call("POST", "/contents/createFolder", token,
                          json={"parentFolderId": parent_id, "folderName": name})
-    return data["id"], data.get("name", name)
+    folder_id = data["id"]
+    # A freshly created folder defaults to private ("public": false) --
+    # completely undocumented, only found by creating one and checking its
+    # own /contents response, and confirmed against a second, unrelated
+    # guest account that it really is "This content is not publicly
+    # accessible" until this call. Every share link this app hands out is
+    # meant to be immediately open to whoever has it, same as every other
+    # site here, so this always flips it right after creating it -- for
+    # both the guest-folder batch flow and the regular "crear carpeta"
+    # one, since both go through this same function.
+    _gofile_call("PUT", f"/contents/{folder_id}/update", token,
+                 json={"attribute": "public", "attributeValue": "true"})
+    return folder_id, data.get("name", name)
 
 
 def gofile_upload(token, path, folder_id=None, progress_cb=None):
