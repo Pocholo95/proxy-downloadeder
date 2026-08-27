@@ -398,8 +398,18 @@ apenas la crea, así que cualquier carpeta nueva ya sale accesible.
 El historial de "Subidas" agrupa por esta subida-de-carpeta (ícono 📁,
 nombre = el de la carpeta local) en vez de por archivo individual como
 hace normalmente — adentro, cada archivo muestra **su propio link** más
-el link de la carpeta compartida (ambos funcionan de forma independiente
-en Gofile, así que ninguno de los dos se pierde).
+el link de la carpeta/álbum compartida (Gofile y Bunkr; ambos links
+funcionan de forma independiente, así que ninguno de los dos se pierde).
+El link de álbum de Bunkr se arma a partir del dominio real que devolvió
+esa subida en particular más el id del álbum — no viene listo de su API,
+así que si alguna vez da 404 avisá (significaría que el id del dashboard
+no es el mismo que el slug público del álbum).
+
+FileDitch no tiene carpetas en absoluto (ver más abajo), así que cada
+archivo termina con un link suelto sin nada que los agrupe del lado del
+sitio — el grupo trae su propio botón **"Copiar links FileDitch (N)"**
+para copiar todos esos links juntos, uno por línea, en vez de tener que
+abrir cada fila y copiarlos de a uno.
 
 De dónde sale cada token:
 - **Gofile**: perfil de tu cuenta en gofile.io (API token / account token).

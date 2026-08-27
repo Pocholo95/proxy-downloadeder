@@ -331,12 +331,21 @@ def bunkr_upload(token, path, album_id=None, progress_cb=None):
     files = result.get("files") or []
     if not files or not files[0].get("url"):
         raise UploadError("Bunkr: la subida no devolvió un link")
-    # No folder_url here (unlike Gofile) -- constructing the album's public
-    # /a/<id> URL from the dashboard API's own internal album id would be
-    # guessing whether that id is really the same public slug, and this
-    # module doesn't have a real Bunkr account to verify it against (same
-    # reasoning as sites/filester.py's own folder-listing caveat).
-    return files[0]["url"], None
+    file_url = files[0]["url"]
+    folder_url = None
+    if album_id:
+        # The dashboard API never hands back a ready-made album URL, so
+        # this builds one: same scheme+host the server just used for this
+        # file's own real link (not a guessed/hardcoded Bunkr mirror --
+        # whichever domain this particular upload actually landed on),
+        # standard /a/<id> path. Unverified against a real account (this
+        # module doesn't have one to test with, same caveat as
+        # sites/filester.py's folder listing) -- flag it if the resulting
+        # link 404s, since that'd mean the dashboard's album id isn't the
+        # same as the public share slug after all.
+        parts = urlsplit(file_url)
+        folder_url = f"{parts.scheme}://{parts.netloc}/a/{album_id}"
+    return file_url, folder_url
 
 
 def _json_or_raise(response, site, context=None):

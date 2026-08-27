@@ -1089,11 +1089,20 @@ function uploadGroupCard(key, label, isBatch, jobs) {
   const hasActive = jobs.some((j) => j.status === "queued" || j.status === "uploading" || j.status === "error");
   const override = state.uploadGroupOverride.get(key);
   const open = override === undefined ? hasActive : override;
+  // FileDitch has no folder concept at all (see upload_sites.py) -- every
+  // file in a batch gets its own fully independent link with nothing
+  // tying them together server-side, unlike Gofile/Bunkr's shared folder
+  // link. This is the workaround: gather every FileDitch link in the
+  // group into one clipboard copy, one per line.
+  const fileditchCount = jobs.filter((j) => j.site === "fileditch" && j.url).length;
   return `<div class="upload-group">
     <button type="button" class="upload-group-head" data-action="toggle-group" data-group="${key}" aria-expanded="${open}">
       <span><span class="upload-group-chevron">▸</span>${isBatch ? "📁 " : ""}${label}</span>
       <span class="upload-group-count">${jobs.length} ${jobs.length === 1 ? "subida" : "subidas"}</span>
     </button>
+    ${fileditchCount ? `<div class="upload-group-fileditch">
+      <button type="button" class="btn small" data-action="copy-fileditch-links" data-group="${key}">Copiar links FileDitch (${fileditchCount})</button>
+    </div>` : ""}
     <div class="upload-group-body"${open ? "" : ` style="display:none"`}>
       ${jobs.map(uploadGroupItemRow).join("")}
     </div>
@@ -1110,6 +1119,10 @@ els.uploadJobsList.addEventListener("click", async (e) => {
     refreshUploadJobs();
   } else if (action === "copy-link") {
     copyToClipboard(link, btn);
+  } else if (action === "copy-fileditch-links") {
+    const g = _lastUploadGroups.get(group);
+    const links = (g ? g.jobs : []).filter((j) => j.site === "fileditch" && j.url).map((j) => j.url);
+    copyToClipboard(links.join("\n"), btn);
   } else if (action === "retry-upload") {
     btn.disabled = true;
     try {
@@ -1128,6 +1141,8 @@ els.uploadJobsList.addEventListener("click", async (e) => {
   }
 });
 
+let _lastUploadGroups = new Map();
+
 async function refreshUploadJobs() {
   try {
     const jobs = await fetchJSON("/api/uploads/jobs");
@@ -1143,6 +1158,7 @@ async function refreshUploadJobs() {
       }
       groups.get(key).jobs.push(job);
     }
+    _lastUploadGroups = groups;
     for (const g of groups.values()) g.jobs.sort((a, b) => b.created_at - a.created_at);
     const groupEntries = [...groups.entries()].sort((a, b) => {
       const aMax = Math.max(...a[1].jobs.map((j) => j.created_at));
