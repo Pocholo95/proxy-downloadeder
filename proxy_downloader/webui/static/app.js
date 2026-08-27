@@ -1079,6 +1079,7 @@ function uploadGroupItemRow(job) {
       <span class="badge ${job.status}">${STATUS_LABELS[job.status] || job.status}</span>
       ${job.url ? `<button type="button" class="btn small" data-action="copy-link" data-link="${job.url}">Copiar</button>` : ""}
       ${job.folder_url ? `<button type="button" class="btn small" data-action="copy-link" data-link="${job.folder_url}">Copiar carpeta</button>` : ""}
+      ${(job.site === "gofile" && job.dest_folder_id && job.status === "done") ? `<button type="button" class="btn small" data-action="make-public" data-id="${job.id}">Hacer pública</button>` : ""}
       ${job.status === "error" ? `<button type="button" class="btn small" data-action="retry-upload" data-id="${job.id}">Reintentar</button>` : ""}
       ${(job.status === "done" || job.status === "error") ? `<button type="button" class="btn small" data-action="delete-upload" data-id="${job.id}">Borrar</button>` : ""}
     </div>
@@ -1124,6 +1125,15 @@ els.uploadJobsList.addEventListener("click", async (e) => {
       refreshUploadJobs();
     } catch (err) {
       alert(err.message);
+    }
+  } else if (action === "make-public") {
+    btn.disabled = true;
+    try {
+      await fetchJSON(`/api/uploads/jobs/${id}/make-public`, { method: "POST" });
+      btn.textContent = "✓ Pública";
+    } catch (err) {
+      alert(err.message);
+      btn.disabled = false;
     }
   }
 });

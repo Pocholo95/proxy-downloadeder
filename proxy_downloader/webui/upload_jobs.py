@@ -186,6 +186,29 @@ class UploadManager:
         folder_id, folder_name = info["create_folder"](token, root_id, name.strip())
         return {"token": token, "folder_id": folder_id, "folder_name": folder_name}
 
+    def make_public(self, job_id):
+        """Retroactively fixes a folder created before gofile_create_folder()
+        started doing this on its own -- an already-finished job still has
+        everything needed: its own guest_token if this was an anonymous
+        batch, or the site's current account token otherwise, either way
+        pointing at the same dest_folder_id every other file in that batch
+        shares (so fixing it from any one of them fixes the whole folder)."""
+        job = self.jobs.get(job_id)
+        if not job:
+            raise ValueError("Job not found")
+        info = upload_sites.SITES.get(job.site)
+        if not info or not info.get("make_public"):
+            raise ValueError("Este sitio no lo necesita/soporta")
+        if not job.dest_folder_id:
+            raise ValueError("Este trabajo no subió a una carpeta")
+        token = job.guest_token
+        if not token:
+            creds = site_prefs.get_upload_account(job.site)
+            if not creds:
+                raise ValueError("No hay token disponible para esta carpeta")
+            token = creds["token"]
+        info["make_public"](token, job.dest_folder_id)
+
     # ── persistence ──
     def _load_persisted(self):
         if not self._jobs_file.exists():

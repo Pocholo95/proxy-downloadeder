@@ -391,6 +391,14 @@ N archivos) y sube todo ahí. Sin login en ningún momento — Bunkr/Filester
 no tienen equivalente porque esos sí exigen cuenta real para tener
 carpetas, punto.
 
+Gofile crea toda carpeta nueva como **privada** por defecto (nada lo
+avisa, ni siquiera lo documenta) — esta app la hace pública automáticamente
+apenas la crea, así que cualquier carpeta nueva ya sale accesible. Una que
+hayas creado antes de este fix quedó privada; el botón **"Hacer pública"**
+en cada fila de "Subidas" con destino Gofile la arregla en el momento, sin
+tener que resubir nada (usa el mismo token —de cuenta o invitado, el que
+corresponda— que ya tenía guardado ese trabajo).
+
 El historial de "Subidas" agrupa por esta subida-de-carpeta (ícono 📁,
 nombre = el de la carpeta local) en vez de por archivo individual como
 hace normalmente — adentro, cada archivo muestra **su propio link** más
@@ -502,7 +510,8 @@ La API REST que usa el frontend (`GET/POST /api/jobs`, `GET /api/jobs/<id>`,
 `GET /api/uploads/sites`,
 `POST/DELETE /api/uploads/account/<sitio>`, `GET/POST /api/uploads/folders/<sitio>`,
 `GET/POST /api/uploads/jobs`, `GET/DELETE /api/uploads/jobs/<id>`,
-`POST /api/uploads/jobs/<id>/retry`, `POST /api/uploads/folder-jobs`,
+`POST /api/uploads/jobs/<id>/retry`, `POST /api/uploads/jobs/<id>/make-public`,
+`POST /api/uploads/folder-jobs`,
 `POST /api/uploads/clear-finished`, `GET/POST /api/ytdlp/jobs`,
 `GET /api/ytdlp/jobs/<id>`, `GET /api/ytdlp/jobs/<id>/log`,
 `POST /api/ytdlp/jobs/<id>/cancel`, `DELETE /api/ytdlp/jobs/<id>`,
