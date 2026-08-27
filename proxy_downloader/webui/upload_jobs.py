@@ -19,7 +19,7 @@ MAX_HISTORY = 200
 
 class UploadJob:
     def __init__(self, job_id, site, source_path, source_name, dest_folder_id,
-                 dest_folder_name, is_temp_source):
+                 dest_folder_name, is_temp_source, guest_token=None, batch_id=None, batch_label=None):
         self.id = job_id
         self.site = site
         self.source_path = source_path
@@ -27,9 +27,27 @@ class UploadJob:
         self.dest_folder_id = dest_folder_id
         self.dest_folder_name = dest_folder_name
         self.is_temp_source = is_temp_source  # delete source_path once finished successfully
+        # Only set for an anonymous-Gofile folder batch: the temp guest
+        # account token every file in that batch shares, so they all land
+        # in the same dest_folder_id instead of each getting its own
+        # independent one-file "folder" the way a lone anonymous upload
+        # normally would. None for every other site, and for Gofile when a
+        # real account is configured (that account's own token is used
+        # instead, from site_prefs, same as any other upload).
+        self.guest_token = guest_token
+        # Only set when this job came from POST /api/uploads/folder-jobs
+        # (uploading every file in a local folder at once): every job from
+        # that one request shares the same batch_id/batch_label, so the UI
+        # can cluster them into one group even though they're N different
+        # source files (unlike the single-file-to-several-sites case below,
+        # which already groups naturally by sharing one source_name).
+        self.batch_id = batch_id
+        self.batch_label = batch_label
         self.status = "queued"  # queued|uploading|done|error
         self.error = None
         self.url = None
+        self.folder_url = None  # set only when dest_folder_id was used AND the site
+                                 # exposes a real, independent link for the folder itself
         self.bytes_sent = 0
         self.total_bytes = 0
         self.created_at = time.time()
@@ -50,6 +68,9 @@ class UploadJob:
                 "status": self.status,
                 "error": self.error,
                 "url": self.url,
+                "folder_url": self.folder_url,
+                "batch_id": self.batch_id,
+                "batch_label": self.batch_label,
                 "bytes_sent": self.bytes_sent,
                 "total_bytes": self.total_bytes,
                 "created_at": self.created_at,
@@ -57,13 +78,20 @@ class UploadJob:
                 "finished_at": self.finished_at,
             }
 
+    def to_persist_dict(self):
+        d = self.to_dict()
+        d["guest_token"] = self.guest_token
+        return d
+
     @classmethod
     def from_dict(cls, d):
         job = cls(d["id"], d["site"], d.get("source_path"), d["source_name"],
-                   d.get("dest_folder_id"), d.get("dest_folder_name"), d.get("is_temp_source", False))
+                   d.get("dest_folder_id"), d.get("dest_folder_name"), d.get("is_temp_source", False),
+                   guest_token=d.get("guest_token"), batch_id=d.get("batch_id"), batch_label=d.get("batch_label"))
         job.status = d.get("status", "error")
         job.error = d.get("error")
         job.url = d.get("url")
+        job.folder_url = d.get("folder_url")
         job.bytes_sent = d.get("bytes_sent", 0)
         job.total_bytes = d.get("total_bytes", 0)
         job.created_at = d.get("created_at") or time.time()
@@ -144,6 +172,20 @@ class UploadManager:
         folder_id, folder_name = info["create_folder"](creds["token"], parent_id or creds.get("root_id"), name.strip())
         return {"id": folder_id, "name": folder_name}
 
+    def create_guest_folder(self, site, name):
+        """Mints a throwaway anonymous account and a named folder under it,
+        no login involved -- for grouping a multi-file batch upload to a
+        site whose account is optional (today: only Gofile) into one temp
+        folder instead of each file landing in its own independent one."""
+        info = upload_sites.SITES.get(site)
+        if not info or not info.get("create_guest_token"):
+            raise ValueError("Este sitio no soporta carpetas de invitado")
+        if not name or not name.strip():
+            raise ValueError("Falta el nombre")
+        token, root_id = info["create_guest_token"]()
+        folder_id, folder_name = info["create_folder"](token, root_id, name.strip())
+        return {"token": token, "folder_id": folder_id, "folder_name": folder_name}
+
     # ── persistence ──
     def _load_persisted(self):
         if not self._jobs_file.exists():
@@ -168,7 +210,7 @@ class UploadManager:
         with self._meta_lock:
             self._prune_locked()
             try:
-                payload = [self.jobs[i].to_dict() for i in self.order if i in self.jobs]
+                payload = [self.jobs[i].to_persist_dict() for i in self.order if i in self.jobs]
                 tmp_path = self._jobs_file.with_suffix(".json.tmp")
                 tmp_path.write_text(json.dumps(payload))
                 tmp_path.replace(self._jobs_file)
@@ -191,12 +233,14 @@ class UploadManager:
 
     # ── jobs ──
     def create_job(self, site, source_path, source_name, dest_folder_id=None,
-                    dest_folder_name=None, is_temp_source=False):
+                    dest_folder_name=None, is_temp_source=False, guest_token=None,
+                    batch_id=None, batch_label=None):
         if site not in upload_sites.SITES:
             raise ValueError("Sitio desconocido")
         job_id = uuid.uuid4().hex[:12]
         job = UploadJob(job_id, site, str(source_path), source_name,
-                         dest_folder_id, dest_folder_name, is_temp_source)
+                         dest_folder_id, dest_folder_name, is_temp_source, guest_token=guest_token,
+                         batch_id=batch_id, batch_label=batch_label)
         with self._meta_lock:
             self.jobs[job_id] = job
             self.order.append(job_id)
@@ -253,12 +297,15 @@ class UploadManager:
                 raise ValueError("Solo se puede reintentar un trabajo que falló")
             source_path = src.source_path
             is_temp_source = src.is_temp_source
+            guest_token = src.guest_token
+            batch_id, batch_label = src.batch_id, src.batch_label
         if not source_path or not Path(source_path).exists():
             raise ValueError("El archivo original ya no está disponible — subilo de nuevo")
 
         job = self.create_job(src.site, source_path, src.source_name,
                                dest_folder_id=src.dest_folder_id, dest_folder_name=src.dest_folder_name,
-                               is_temp_source=is_temp_source)
+                               is_temp_source=is_temp_source, guest_token=guest_token,
+                               batch_id=batch_id, batch_label=batch_label)
         with src.lock:
             src.is_temp_source = False
         self._persist()
@@ -315,7 +362,13 @@ class UploadManager:
                     raise upload_sites.UploadError("La cuenta de este sitio ya no está configurada")
                 if creds:
                     token = creds["token"]
-            url = info["upload"](token, job.source_path, job.dest_folder_id, progress_cb=progress_cb)
+                elif job.guest_token:
+                    # No real account configured, but this job belongs to an
+                    # anonymous-folder batch (see create_guest_folder()) --
+                    # use its shared guest token so it lands in that batch's
+                    # dest_folder_id instead of an independent one-file folder.
+                    token = job.guest_token
+            url, folder_url = info["upload"](token, job.source_path, job.dest_folder_id, progress_cb=progress_cb)
         except upload_sites.UploadError as e:
             with job.lock:
                 job.status = "error"
@@ -335,6 +388,7 @@ class UploadManager:
         with job.lock:
             job.status = "done"
             job.url = url
+            job.folder_url = folder_url
             if job.total_bytes:
                 job.bytes_sent = job.total_bytes
 

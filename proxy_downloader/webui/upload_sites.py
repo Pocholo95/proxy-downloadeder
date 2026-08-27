@@ -127,6 +127,26 @@ def _gofile_call(method, path, token, **kwargs):
     return data["data"]
 
 
+def gofile_create_guest_token():
+    """Mints a temporary anonymous Gofile account -- exactly what an
+    anonymous upload already gets implicitly server-side (its response
+    includes a "guestToken"), just obtained explicitly and upfront so a
+    whole batch of files can share it (and one folder created under it)
+    via the exact same token-based calls a real account uses below, no
+    login involved. Returns (guest_token, root_folder_id)."""
+    r = requests.post(f"{_GOFILE_API}/accounts", json={},
+                       headers={"X-Website-Token": _gofile_wt(""), "X-BL": "en-US", "User-Agent": USER_AGENT},
+                       timeout=TIMEOUT)
+    try:
+        data = r.json()
+    except ValueError:
+        raise UploadError(f"gofile: respuesta inesperada creando cuenta invitada (HTTP {r.status_code})")
+    if data.get("status") != "ok":
+        raise UploadError("gofile: no se pudo crear una cuenta invitada")
+    d = data["data"]
+    return d["token"], d["rootFolder"]
+
+
 def gofile_verify(token):
     """Returns (label, root_folder_id) on a valid token, raises UploadError otherwise."""
     try:
@@ -159,7 +179,15 @@ def gofile_create_folder(token, parent_id, name):
 def gofile_upload(token, path, folder_id=None, progress_cb=None):
     """`token` is optional — without one this uploads to a temporary guest
     account (link works, but expires after ~10 days of inactivity and can't
-    target a folder). Passing a token makes it permanent and folder-aware."""
+    target a folder). Passing a token makes it permanent and folder-aware.
+
+    Returns (file_url, folder_url) -- folder_url is None unless this landed
+    in a folder, in which case both the file's own link (its own "code",
+    always distinct from the folder's) and the folder's link
+    ("parentFolderCode") are real, independently-working share links, so
+    both are worth surfacing rather than just one silently swallowing the
+    other (this used to only return the folder link when there was one,
+    losing the file's own)."""
     fields = {}
     if folder_id and token:
         fields["folderId"] = (None, folder_id)
@@ -176,7 +204,10 @@ def gofile_upload(token, path, folder_id=None, progress_cb=None):
     if data.get("status") != "ok":
         raise UploadError(f"gofile: {data.get('status', 'error al subir')}")
     d = data["data"]
-    return f"https://gofile.io/d/{d.get('parentFolderCode') or d['code']}"
+    file_url = f"https://gofile.io/d/{d['code']}"
+    folder_code = d.get("parentFolderCode")
+    folder_url = f"https://gofile.io/d/{folder_code}" if folder_code else None
+    return file_url, folder_url
 
 
 # ── Bunkr ───────────────────────────────────────────────────────────────
@@ -284,7 +315,12 @@ def bunkr_upload(token, path, album_id=None, progress_cb=None):
     files = result.get("files") or []
     if not files or not files[0].get("url"):
         raise UploadError("Bunkr: la subida no devolvió un link")
-    return files[0]["url"]
+    # No folder_url here (unlike Gofile) -- constructing the album's public
+    # /a/<id> URL from the dashboard API's own internal album id would be
+    # guessing whether that id is really the same public slug, and this
+    # module doesn't have a real Bunkr account to verify it against (same
+    # reasoning as sites/filester.py's own folder-listing caveat).
+    return files[0]["url"], None
 
 
 def _json_or_raise(response, site, context=None):
@@ -362,7 +398,8 @@ def filester_upload(token, path, folder_id=None, progress_cb=None):
         raise UploadError(f"Filester: respuesta inesperada al subir (HTTP {r.status_code})")
     if not data.get("success"):
         raise UploadError(f"Filester: {data.get('message') or 'error al subir'}")
-    return data["url"]
+    # No folder_url -- same reasoning as bunkr_upload() above.
+    return data["url"], None
 
 
 # ── FileDitch ───────────────────────────────────────────────────────────
@@ -385,7 +422,7 @@ def fileditch_upload(path, progress_cb=None):
         raise UploadError(f"FileDitch: respuesta inesperada (HTTP {r.status_code})")
     if not data.get("success"):
         raise UploadError(f"FileDitch: {data.get('error') or 'error al subir'}")
-    return data["url"]
+    return data["url"], None  # no folders on FileDitch at all
 
 
 # ── registry ────────────────────────────────────────────────────────────
@@ -399,6 +436,11 @@ SITES = {
         "list_folders": gofile_list_folders,
         "create_folder": gofile_create_folder,
         "upload": gofile_upload,
+        # Only Gofile has this: a temp folder that groups several anonymous
+        # uploads together without ever requiring a real account. Sites
+        # that need_account (Bunkr/Filester) have no anonymous-folder
+        # concept at all; FileDitch has no folders, period.
+        "create_guest_token": gofile_create_guest_token,
     },
     "bunkr": {
         "label": "Bunkr",

@@ -9,6 +9,7 @@ const state = {
   uploadFoldersBySite: {},            // site -> [{id, name}, ...]
   uploadFolderChoiceBySite: {},       // site -> chosen folder id
   uploadSelectedExisting: null,       // {path, name} of an already-downloaded file picked for upload
+  uploadSelectedFolder: null,         // {path, name} of an already-downloaded folder picked for a batch upload
   uploadGroupOverride: new Map(),     // source_name -> explicit open/closed the user picked
 };
 
@@ -568,7 +569,7 @@ function fileRow(entry) {
     <td class="dim">${fmtDate(entry.mtime)}</td>
     <td class="actions">
       ${entry.optimizable ? `<button class="btn small" data-optimize="${path}">🚀 Optimizar</button>` : ""}
-      ${entry.is_dir ? "" : `<button class="btn small" data-upload-existing="${path}" data-upload-name="${entry.name}">⬆ Subir</button>`}
+      ${entry.is_dir ? `<button class="btn small" data-upload-folder="${path}" data-upload-name="${entry.name}">⬆ Subir carpeta</button>` : `<button class="btn small" data-upload-existing="${path}" data-upload-name="${entry.name}">⬆ Subir</button>`}
       <button class="btn small" data-download="${path}">Descargar${entry.is_dir ? " (.zip)" : ""}</button>
       ${entry.partial ? "" : `<button class="btn small" data-rename="${path}" data-name="${entry.name}">✏ Renombrar</button>`}
       <button class="btn small danger" data-delete="${path}" data-name="${entry.name}">Borrar</button>
@@ -613,7 +614,19 @@ async function loadFiles(path) {
     });
     els.filesList.querySelectorAll("button[data-upload-existing]").forEach((btn) => {
       btn.addEventListener("click", () => {
+        state.uploadSelectedFolder = null;
         state.uploadSelectedExisting = { path: btn.dataset.uploadExisting, name: btn.dataset.uploadName };
+        els.uploadFileInput.value = "";
+        renderUploadSelectedExisting();
+        switchToUploadTab();
+        els.newJobCard.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    });
+    els.filesList.querySelectorAll("button[data-upload-folder]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        state.uploadSelectedExisting = null;
+        state.uploadSelectedFolder = { path: btn.dataset.uploadFolder, name: btn.dataset.uploadName };
+        els.uploadFileInput.value = "";
         renderUploadSelectedExisting();
         switchToUploadTab();
         els.newJobCard.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -699,17 +712,22 @@ document.addEventListener("keydown", (e) => {
 // ── Uploads (multi-site: same file(s) to every site you check) ─────────────
 
 function renderUploadSelectedExisting() {
-  if (!state.uploadSelectedExisting) {
+  let html = "";
+  if (state.uploadSelectedFolder) {
+    html = `Vas a subir la carpeta: <strong>${state.uploadSelectedFolder.name}</strong> (todos sus archivos) `;
+  } else if (state.uploadSelectedExisting) {
+    html = `Vas a subir: <strong>${state.uploadSelectedExisting.name}</strong> (ya descargado) `;
+  } else {
     els.uploadSelectedExistingEl.classList.add("hidden");
     els.uploadSelectedExistingEl.innerHTML = "";
     return;
   }
   els.uploadSelectedExistingEl.classList.remove("hidden");
   els.uploadSelectedExistingEl.innerHTML =
-    `Vas a subir: <strong>${state.uploadSelectedExisting.name}</strong> (ya descargado) ` +
-    `<button type="button" class="btn small" id="upload-selected-clear">quitar</button>`;
+    html + `<button type="button" class="btn small" id="upload-selected-clear">quitar</button>`;
   document.getElementById("upload-selected-clear").addEventListener("click", () => {
     state.uploadSelectedExisting = null;
+    state.uploadSelectedFolder = null;
     renderUploadSelectedExisting();
   });
 }
@@ -882,6 +900,13 @@ async function refreshUploadSites() {
   }
 }
 
+els.uploadFileInput.addEventListener("change", () => {
+  if (!els.uploadFileInput.files.length) return;
+  state.uploadSelectedFolder = null;
+  state.uploadSelectedExisting = null;
+  renderUploadSelectedExisting();
+});
+
 async function submitUpload() {
   els.uploadFormError.textContent = "";
   const sites = [...state.uploadSelectedSites].map(siteInfo).filter(Boolean);
@@ -894,6 +919,36 @@ async function submitUpload() {
     els.uploadFormError.textContent = `Configurá la cuenta primero: ${notReady.map((s) => s.label).join(", ")}`;
     return;
   }
+
+  if (state.uploadSelectedFolder) {
+    els.submitBtn.disabled = true;
+    try {
+      const sitesPayload = sites.map((info) => {
+        const folderId = info.has_folders ? (state.uploadFolderChoiceBySite[info.site] || null) : null;
+        const folderName = folderId
+          ? ((state.uploadFoldersBySite[info.site] || []).find((f) => f.id === folderId) || {}).name
+          : null;
+        return { site: info.site, folder_id: folderId, folder_name: folderName };
+      });
+      const result = await fetchJSON("/api/uploads/folder-jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: state.uploadSelectedFolder.path, sites: sitesPayload }),
+      });
+      if (result.errors && result.errors.length) {
+        els.uploadFormError.textContent = result.errors.join("; ");
+      }
+      state.uploadSelectedFolder = null;
+      renderUploadSelectedExisting();
+      refreshUploadJobs();
+    } catch (err) {
+      els.uploadFormError.textContent = err.message;
+    } finally {
+      els.submitBtn.disabled = false;
+    }
+    return;
+  }
+
   const files = [...els.uploadFileInput.files];
   if (!files.length && !state.uploadSelectedExisting) {
     els.uploadFormError.textContent = "Elegí un archivo del dispositivo o uno ya descargado";
@@ -971,31 +1026,43 @@ function fallbackCopy(text, done) {
 function uploadGroupItemRow(job) {
   const pct = job.total_bytes > 0 ? Math.min(100, (job.bytes_sent / job.total_bytes) * 100) : (job.status === "done" ? 100 : 0);
   const dest = job.dest_folder_name ? ` → ${job.dest_folder_name}` : "";
-  const sub = job.url
-    ? `<a href="${job.url}" target="_blank" rel="noopener">${job.url}</a>`
-    : (job.error || (job.status === "uploading" ? `${fmtBytes(job.bytes_sent)} / ${fmtBytes(job.total_bytes)}` : ""));
+  // The group header already shows the source filename for a single-file
+  // group (see uploadGroupCard) -- only a batch group's items need it
+  // repeated here, since that header shows the shared destination folder
+  // name instead, and each row in it is a different local file.
+  const filePrefix = job.batch_id ? `${job.source_name} · ` : "";
+  let sub;
+  if (job.url) {
+    sub = `<a href="${job.url}" target="_blank" rel="noopener">${job.url}</a>`;
+    if (job.folder_url) {
+      sub += `<br>carpeta: <a href="${job.folder_url}" target="_blank" rel="noopener">${job.folder_url}</a>`;
+    }
+  } else {
+    sub = job.error || (job.status === "uploading" ? `${fmtBytes(job.bytes_sent)} / ${fmtBytes(job.total_bytes)}` : "");
+  }
   return `<div class="upload-group-item">
     <div class="upload-group-item-main">
-      <div class="upload-group-item-site">${job.site}${dest}</div>
+      <div class="upload-group-item-site">${filePrefix}${job.site}${dest}</div>
       <div class="upload-group-item-sub">${sub}</div>
     </div>
     <div class="upload-group-item-actions">
       ${job.status === "uploading" ? `<div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>` : ""}
       <span class="badge ${job.status}">${STATUS_LABELS[job.status] || job.status}</span>
       ${job.url ? `<button type="button" class="btn small" data-action="copy-link" data-link="${job.url}">Copiar</button>` : ""}
+      ${job.folder_url ? `<button type="button" class="btn small" data-action="copy-link" data-link="${job.folder_url}">Copiar carpeta</button>` : ""}
       ${job.status === "error" ? `<button type="button" class="btn small" data-action="retry-upload" data-id="${job.id}">Reintentar</button>` : ""}
       ${(job.status === "done" || job.status === "error") ? `<button type="button" class="btn small" data-action="delete-upload" data-id="${job.id}">Borrar</button>` : ""}
     </div>
   </div>`;
 }
 
-function uploadGroupCard(name, jobs) {
+function uploadGroupCard(key, label, isBatch, jobs) {
   const hasActive = jobs.some((j) => j.status === "queued" || j.status === "uploading" || j.status === "error");
-  const override = state.uploadGroupOverride.get(name);
+  const override = state.uploadGroupOverride.get(key);
   const open = override === undefined ? hasActive : override;
   return `<div class="upload-group">
-    <button type="button" class="upload-group-head" data-action="toggle-group" data-group="${name}" aria-expanded="${open}">
-      <span><span class="upload-group-chevron">▸</span>${name}</span>
+    <button type="button" class="upload-group-head" data-action="toggle-group" data-group="${key}" aria-expanded="${open}">
+      <span><span class="upload-group-chevron">▸</span>${isBatch ? "📁 " : ""}${label}</span>
       <span class="upload-group-count">${jobs.length} ${jobs.length === 1 ? "subida" : "subidas"}</span>
     </button>
     <div class="upload-group-body"${open ? "" : ` style="display:none"`}>
@@ -1035,19 +1102,26 @@ els.uploadJobsList.addEventListener("click", async (e) => {
 async function refreshUploadJobs() {
   try {
     const jobs = await fetchJSON("/api/uploads/jobs");
-    const groups = new Map();
+    // Group by batch_id when present (every file from one "Subir carpeta"
+    // batch, N different source_names that would otherwise each start
+    // their own separate group) -- else by source_name, the original
+    // case of one file uploaded to several sites landing in one group.
+    const groups = new Map(); // key -> {label, isBatch, jobs}
     for (const job of jobs) {
-      if (!groups.has(job.source_name)) groups.set(job.source_name, []);
-      groups.get(job.source_name).push(job);
+      const key = job.batch_id || job.source_name;
+      if (!groups.has(key)) {
+        groups.set(key, { label: job.batch_id ? (job.batch_label || key) : job.source_name, isBatch: !!job.batch_id, jobs: [] });
+      }
+      groups.get(key).jobs.push(job);
     }
-    for (const list of groups.values()) list.sort((a, b) => b.created_at - a.created_at);
+    for (const g of groups.values()) g.jobs.sort((a, b) => b.created_at - a.created_at);
     const groupEntries = [...groups.entries()].sort((a, b) => {
-      const aMax = Math.max(...a[1].map((j) => j.created_at));
-      const bMax = Math.max(...b[1].map((j) => j.created_at));
+      const aMax = Math.max(...a[1].jobs.map((j) => j.created_at));
+      const bMax = Math.max(...b[1].jobs.map((j) => j.created_at));
       return bMax - aMax;
     });
     const html = groupEntries.length
-      ? groupEntries.map(([name, list]) => uploadGroupCard(name, list)).join("")
+      ? groupEntries.map(([key, g]) => uploadGroupCard(key, g.label, g.isBatch, g.jobs)).join("")
       : `<p class="dim">Sin subidas todavía.</p>`;
     updateListHTML(els.uploadJobsList, "uploads", html);
   } catch (err) {

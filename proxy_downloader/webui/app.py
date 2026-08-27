@@ -354,6 +354,76 @@ def api_create_upload_job():
     return jsonify(job.to_dict()), 201
 
 
+@app.post("/api/uploads/folder-jobs")
+def api_create_upload_folder_jobs():
+    """Uploads every file directly inside an already-downloaded folder to
+    one or more sites, all landing in a single destination folder per site
+    instead of the N independent one-file uploads the per-file endpoint
+    above would produce. For a site with an account configured, that's
+    an existing/newly-created folder the same way the single-file flow
+    already supports; for a site whose account is optional (only Gofile)
+    and none is configured, a throwaway anonymous folder is created for
+    the whole batch (see UploadManager.create_guest_folder) -- a temp
+    folder on the host with no login involved, same idea as a downloaded
+    folder staying grouped locally."""
+    data = request.get_json(silent=True) or {}
+    sites_payload = data.get("sites") or []
+    if not sites_payload:
+        return jsonify({"error": "Marcá al menos un sitio destino"}), 400
+    try:
+        folder_path = files_api.safe_path(OUTPUT_DIR, data.get("path", ""))
+    except files_api.UnsafePath:
+        return jsonify({"error": "invalid path"}), 400
+    if not folder_path.is_dir():
+        return jsonify({"error": "not found"}), 404
+
+    local_files = sorted(p for p in folder_path.iterdir() if p.is_file() and p.suffix != ".part")
+    if not local_files:
+        return jsonify({"error": "La carpeta está vacía"}), 400
+
+    configured = {s["site"]: s["configured"] for s in upload_manager.list_upload_sites()}
+    # Every job from this one request shares this batch id/label -- the N
+    # files are N different source_names, which on their own would each
+    # start their own separate group in the UI (that grouping is by
+    # source_name, for the *other* case of one file going to several
+    # sites); this is what lets the UI cluster them into one group instead.
+    batch_id = uuid.uuid4().hex[:12]
+    batch_label = folder_path.name
+
+    created = []
+    errors = []
+    for choice in sites_payload:
+        site = choice.get("site")
+        info = upload_sites.SITES.get(site)
+        if not info:
+            errors.append(f"{site}: sitio desconocido")
+            continue
+        folder_id = choice.get("folder_id")
+        folder_name = choice.get("folder_name")
+        guest_token = None
+        try:
+            if info["has_folders"] and not folder_id:
+                if info.get("create_guest_token") and not configured.get(site):
+                    guest = upload_manager.create_guest_folder(site, folder_path.name)
+                    guest_token, folder_id, folder_name = guest["token"], guest["folder_id"], guest["folder_name"]
+                else:
+                    created_folder = upload_manager.create_folder(site, folder_path.name)
+                    folder_id, folder_name = created_folder["id"], created_folder["name"]
+        except (ValueError, upload_sites.UploadError) as e:
+            errors.append(f"{info['label']}: {e}")
+            continue
+
+        for f in local_files:
+            job = upload_manager.create_job(site, f, f.name, dest_folder_id=folder_id,
+                                             dest_folder_name=folder_name, guest_token=guest_token,
+                                             batch_id=batch_id, batch_label=batch_label)
+            created.append(job.to_dict())
+
+    if not created and errors:
+        return jsonify({"error": "; ".join(errors)}), 400
+    return jsonify({"jobs": created, "errors": errors}), 201
+
+
 @app.post("/api/uploads/jobs/<job_id>/retry")
 def api_retry_upload_job(job_id):
     try:

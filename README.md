@@ -364,11 +364,34 @@ pegar el token (se verifica y se guarda en `config/<sitio>.json`, nunca se
 vuelve a mostrar en la UI) y elegir o crear la carpeta/álbum destino — cada
 sitio tildado tiene su propio bloque, así que podés mandar a distintas
 carpetas en cada uno. Gofile tiene cuenta **opcional**: sin token sube como
-invitado (link funciona igual, pero expira a los ~10 días de inactividad y
-no podés elegir carpeta); cargando un token queda permanente y con
-selector de carpeta, igual que Bunkr/Filester. FileDitch no tiene
+invitado (link funciona igual, pero expira a los ~10 días de inactividad, y
+la pestaña normal de Subir no te deja elegir carpeta sin cuenta — para eso
+está "Subir carpeta", ver más abajo); cargando un token queda permanente y
+con selector de carpeta, igual que Bunkr/Filester. FileDitch no tiene
 cuentas ni carpetas: sube anónimo, cada archivo es un link suelto
 independiente.
+
+#### Subir carpeta
+
+Cada fila de carpeta en "Archivos" tiene su propio botón **"⬆ Subir
+carpeta"** (junto al de cada archivo suelto) — sube todo lo que hay adentro
+(no recursivo) a los sitios que tildes, agrupado en **una sola carpeta
+destino por sitio** en vez de que cada archivo termine desperdigado en su
+propio link suelto. Para un sitio con cuenta configurada, usa la carpeta
+que hayas elegido/creado en su bloque de arriba, igual que una subida
+normal. Para Gofile **sin cuenta**, arma sola una carpeta temporal
+anónima — crea una cuenta invitada al vuelo (mismo mecanismo que ya usa
+cualquier subida anónima a Gofile por debajo, solo que acá se pide
+explícitamente antes de subir nada, para poder nombrar la carpeta y
+reusar esa misma cuenta invitada en los N archivos) y sube todo ahí. Sin
+login en ningún momento — Bunkr/Filester no tienen equivalente porque
+esos sí exigen cuenta real para tener carpetas, punto.
+
+El historial de "Subidas" agrupa por esta subida-de-carpeta (ícono 📁,
+nombre = el de la carpeta local) en vez de por archivo individual como
+hace normalmente — adentro, cada archivo muestra **su propio link** más
+el link de la carpeta compartida (ambos funcionan de forma independiente
+en Gofile, así que ninguno de los dos se pierde).
 
 De dónde sale cada token:
 - **Gofile**: perfil de tu cuenta en gofile.io (API token / account token).
@@ -475,7 +498,7 @@ La API REST que usa el frontend (`GET/POST /api/jobs`, `GET /api/jobs/<id>`,
 `GET /api/uploads/sites`,
 `POST/DELETE /api/uploads/account/<sitio>`, `GET/POST /api/uploads/folders/<sitio>`,
 `GET/POST /api/uploads/jobs`, `GET/DELETE /api/uploads/jobs/<id>`,
-`POST /api/uploads/jobs/<id>/retry`,
+`POST /api/uploads/jobs/<id>/retry`, `POST /api/uploads/folder-jobs`,
 `POST /api/uploads/clear-finished`, `GET/POST /api/ytdlp/jobs`,
 `GET /api/ytdlp/jobs/<id>`, `GET /api/ytdlp/jobs/<id>/log`,
 `POST /api/ytdlp/jobs/<id>/cancel`, `DELETE /api/ytdlp/jobs/<id>`,
