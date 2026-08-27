@@ -439,20 +439,6 @@ def api_retry_upload_job(job_id):
     return jsonify(job.to_dict()), 201
 
 
-@app.post("/api/uploads/jobs/<job_id>/make-public")
-def api_make_upload_job_public(job_id):
-    """Retroactively fixes a Gofile folder created before
-    gofile_create_folder() started making new ones public automatically --
-    see upload_sites.gofile_make_public's docstring for why this exists."""
-    try:
-        upload_manager.make_public(job_id)
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-    except upload_sites.UploadError as e:
-        return jsonify({"error": str(e)}), 502
-    return jsonify({"ok": True})
-
-
 @app.delete("/api/uploads/jobs/<job_id>")
 def api_delete_upload_job(job_id):
     try:

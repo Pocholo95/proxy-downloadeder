@@ -187,9 +187,7 @@ def gofile_create_folder(token, parent_id, name):
     # meant to be immediately open to whoever has it, same as every other
     # site here, so this always flips it right after creating it -- for
     # both the guest-folder batch flow and the regular "crear carpeta"
-    # one, since both go through this same function. gofile_make_public()
-    # is exposed separately too, for retroactively fixing a folder that
-    # was created before this existed (see UploadManager.make_public).
+    # one, since both go through this same function.
     gofile_make_public(token, folder_id)
     return folder_id, data.get("name", name)
 
@@ -459,9 +457,6 @@ SITES = {
         # that need_account (Bunkr/Filester) have no anonymous-folder
         # concept at all; FileDitch has no folders, period.
         "create_guest_token": gofile_create_guest_token,
-        # Only Gofile needs this: retroactively flip a folder made before
-        # gofile_create_folder() started doing it automatically (see there).
-        "make_public": gofile_make_public,
     },
     "bunkr": {
         "label": "Bunkr",
