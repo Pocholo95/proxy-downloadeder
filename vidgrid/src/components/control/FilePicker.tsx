@@ -9,11 +9,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { FolderOpen, Upload } from "lucide-react";
+import { ChevronRight, Folder, FolderOpen, Upload } from "lucide-react";
 import { Field, FieldLabel } from "@/components/ui/field";
 import type { VideoSource } from "@/types";
 import { errlog } from "@/utils";
-import { nativeApi, type ScannedFile } from "@/services/nativeApi";
+import {
+  nativeApi,
+  type ScannedFile,
+  type SharedDirEntry,
+} from "@/services/nativeApi";
 
 function fmtSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -75,16 +79,22 @@ function scannedToVideoSource(f: ScannedFile): VideoSource {
  *   these upload the picked files' bytes to the local backend
  *   (uploadInput), since browsers don't expose real filesystem paths.
  *   Multi-select is native to the dialog, so this covers batches too.
- * - The shared-folder shortcut (sharedDir/scanPath below), when the
- *   backend is configured with VIDGRID_SHARED_DIR -- scanned in place by
+ * - The shared-folder browser (sharedDir/listSharedDir below), when the
+ *   backend is configured with VIDGRID_SHARED_DIR -- listed in place by
  *   the backend with no upload at all, since the app and that folder are
  *   on the same machine (e.g. another app's shared downloads volume in a
- *   combined deploy).
+ *   combined deploy). Navigable folder by folder with a breadcrumb rather
+ *   than one flat list of every video found anywhere under it -- a shared
+ *   downloads volume organized into per-batch/per-site subfolders used to
+ *   turn into one giant same-looking list of basenames with no way to
+ *   tell which folder a given file actually came from. Selections persist
+ *   across navigation (selectedFiles is keyed by absolute path, not
+ *   scoped to whichever folder is currently on screen), so picking videos
+ *   from several different folders in one visit to the dialog still works.
  *
  * Used to also have a native folder-picker button and a free-text
  * scan-path field for typing an arbitrary path; dropped both since they
  * were rarely used and Add videos… already covers multi-file selection.
- * handleScanPath still exists to back the sharedDir shortcut below.
  */
 export default function FilePicker({ onSourcesChange }: Props) {
   const [successAnim, setSuccessAnim] = React.useState(false);
@@ -92,8 +102,10 @@ export default function FilePicker({ onSourcesChange }: Props) {
   const [dragActive, setDragActive] = React.useState(false);
   const [pathError, setPathError] = React.useState<string | null>(null);
   const [sharedDir, setSharedDir] = React.useState("");
-  const [browseResults, setBrowseResults] = React.useState<ScannedFile[] | null>(null);
-  const [selectedPaths, setSelectedPaths] = React.useState<Set<string>>(new Set());
+  const [browsePath, setBrowsePath] = React.useState<string | null>(null);
+  const [browseDirs, setBrowseDirs] = React.useState<SharedDirEntry[]>([]);
+  const [browseFiles, setBrowseFiles] = React.useState<ScannedFile[]>([]);
+  const [selectedFiles, setSelectedFiles] = React.useState<Map<string, ScannedFile>>(new Map());
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
@@ -139,52 +151,62 @@ export default function FilePicker({ onSourcesChange }: Props) {
     void ingestFiles(files);
   };
 
-  // Scans the path and opens the picker dialog below rather than adding
+  // Opens (or navigates within) the picker dialog below rather than adding
   // everything found straight away -- a shared folder (the common case
   // this backs) can easily hold way more videos than you want in one
   // batch, so nothing gets added until you explicitly pick some.
-  const handleScanPath = async (path: string) => {
-    if (!path.trim()) return;
+  const loadDir = async (subpath: string) => {
     setBusy(true);
     setPathError(null);
     try {
-      const found = await nativeApi.scanPath(path);
-      if (!found.length) {
-        setPathError("No video files found at that path.");
-      } else {
-        setBrowseResults(found);
-        setSelectedPaths(new Set());
-      }
+      const listing = await nativeApi.listSharedDir(subpath);
+      setBrowsePath(listing.path);
+      setBrowseDirs(listing.dirs);
+      setBrowseFiles(listing.files);
     } catch (e) {
       setPathError(e instanceof Error ? e.message : String(e));
-      errlog(`Failed to scan path "${path}":`, e);
+      errlog(`Failed to list shared dir "${subpath}":`, e);
     } finally {
       setBusy(false);
     }
   };
 
-  const toggleOne = (path: string, checked: boolean) => {
-    setSelectedPaths((prev) => {
-      const next = new Set(prev);
-      if (checked) next.add(path);
-      else next.delete(path);
+  const closeBrowse = () => {
+    setBrowsePath(null);
+    setBrowseDirs([]);
+    setBrowseFiles([]);
+    setSelectedFiles(new Map());
+  };
+
+  const toggleOne = (file: ScannedFile, checked: boolean) => {
+    setSelectedFiles((prev) => {
+      const next = new Map(prev);
+      if (checked) next.set(file.path, file);
+      else next.delete(file.path);
       return next;
     });
   };
 
-  const toggleAll = (checked: boolean) => {
-    setSelectedPaths(checked ? new Set((browseResults ?? []).map((f) => f.path)) : new Set());
+  // Only affects the videos in the folder currently on screen -- selections
+  // from other folders visited earlier this session stay untouched either way.
+  const toggleAllInCurrentFolder = (checked: boolean) => {
+    setSelectedFiles((prev) => {
+      const next = new Map(prev);
+      for (const f of browseFiles) {
+        if (checked) next.set(f.path, f);
+        else next.delete(f.path);
+      }
+      return next;
+    });
   };
 
   const confirmSelection = () => {
-    if (!browseResults) return;
-    const chosen = browseResults.filter((f) => selectedPaths.has(f.path));
+    const chosen = [...selectedFiles.values()];
     if (chosen.length) {
       onSourcesChange(chosen.map(scannedToVideoSource));
       flashSuccess();
     }
-    setBrowseResults(null);
-    setSelectedPaths(new Set());
+    closeBrowse();
   };
 
   return (
@@ -234,7 +256,7 @@ export default function FilePicker({ onSourcesChange }: Props) {
             variant="outline"
             size="sm"
             className="w-full justify-center gap-2"
-            onClick={() => void handleScanPath(sharedDir)}
+            onClick={() => void loadDir("")}
             disabled={busy}
           >
             <FolderOpen className="h-4 w-4 shrink-0" />
@@ -245,42 +267,79 @@ export default function FilePicker({ onSourcesChange }: Props) {
       </div>
 
       <Dialog
-        open={browseResults !== null}
+        open={browsePath !== null}
         onOpenChange={(open) => {
-          if (!open) {
-            setBrowseResults(null);
-            setSelectedPaths(new Set());
-          }
+          if (!open) closeBrowse();
         }}
       >
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Select videos to add</DialogTitle>
             <DialogDescription>
-              Found {browseResults?.length ?? 0} video file
-              {browseResults?.length === 1 ? "" : "s"} at {sharedDir}.
+              Browse {sharedDir} and check the videos you want.
             </DialogDescription>
           </DialogHeader>
-          <label className="flex items-center gap-2 border-b pb-2 text-sm font-medium">
-            <Checkbox
-              checked={
-                browseResults !== null &&
-                browseResults.length > 0 &&
-                selectedPaths.size === browseResults.length
-              }
-              onCheckedChange={(checked) => toggleAll(checked === true)}
-            />
-            Select all
-          </label>
+
+          <div className="flex flex-wrap items-center gap-1 border-b pb-2 text-xs text-muted-foreground">
+            <button
+              type="button"
+              className="hover:text-foreground hover:underline"
+              onClick={() => void loadDir("")}
+            >
+              {sharedDir}
+            </button>
+            {(browsePath ?? "")
+              .split("/")
+              .filter(Boolean)
+              .map((part, i, parts) => {
+                const target = parts.slice(0, i + 1).join("/");
+                return (
+                  <React.Fragment key={target}>
+                    <ChevronRight className="h-3 w-3 shrink-0" />
+                    <button
+                      type="button"
+                      className="hover:text-foreground hover:underline"
+                      onClick={() => void loadDir(target)}
+                    >
+                      {part}
+                    </button>
+                  </React.Fragment>
+                );
+              })}
+          </div>
+
+          {browseFiles.length > 0 && (
+            <label className="flex items-center gap-2 border-b pb-2 text-sm font-medium">
+              <Checkbox
+                checked={browseFiles.every((f) => selectedFiles.has(f.path))}
+                onCheckedChange={(checked) => toggleAllInCurrentFolder(checked === true)}
+              />
+              Select all in this folder
+            </label>
+          )}
+
           <div className="flex max-h-80 flex-col gap-1 overflow-y-auto">
-            {browseResults?.map((f) => (
+            {browseDirs.map((d) => (
+              <button
+                key={d.path}
+                type="button"
+                className="flex items-center gap-2 rounded-md px-1 py-1.5 text-left text-sm hover:bg-accent"
+                onClick={() => void loadDir(d.path)}
+                disabled={busy}
+              >
+                <Folder className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <span className="flex-1 truncate">{d.name}</span>
+                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+              </button>
+            ))}
+            {browseFiles.map((f) => (
               <label
                 key={f.path}
                 className="flex items-center gap-2 rounded-md px-1 py-1.5 text-sm hover:bg-accent"
               >
                 <Checkbox
-                  checked={selectedPaths.has(f.path)}
-                  onCheckedChange={(checked) => toggleOne(f.path, checked === true)}
+                  checked={selectedFiles.has(f.path)}
+                  onCheckedChange={(checked) => toggleOne(f, checked === true)}
                 />
                 <span className="flex-1 truncate" title={f.path}>
                   {f.name}
@@ -290,20 +349,18 @@ export default function FilePicker({ onSourcesChange }: Props) {
                 </span>
               </label>
             ))}
+            {browseDirs.length === 0 && browseFiles.length === 0 && (
+              <p className="py-4 text-center text-sm text-muted-foreground">
+                Empty folder.
+              </p>
+            )}
           </div>
           <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => {
-                setBrowseResults(null);
-                setSelectedPaths(new Set());
-              }}
-            >
+            <Button type="button" variant="outline" onClick={closeBrowse}>
               Cancel
             </Button>
-            <Button type="button" onClick={confirmSelection} disabled={selectedPaths.size === 0}>
-              Add {selectedPaths.size || ""} selected
+            <Button type="button" onClick={confirmSelection} disabled={selectedFiles.size === 0}>
+              Add {selectedFiles.size || ""} selected
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -50,6 +50,9 @@ _ROUTES: dict[tuple[str, str], _RouteFn] = {
     ("GET", "/api/cpu_count"): lambda api, body: {"count": api.get_cpu_count()},
     ("GET", "/api/shared_dir"): lambda api, body: {"path": api.shared_dir()},
     ("POST", "/api/scan_path"): lambda api, body: api.scan_path(body["path"]),
+    ("POST", "/api/list_shared_dir"): (
+        lambda api, body: api.list_shared_dir(body.get("subpath", ""))
+    ),
     ("POST", "/api/probe_metadata"): lambda api, body: api.probe_metadata(body["path"]),
     ("POST", "/api/register_media"): lambda api, body: api.register_media(body["path"]),
     ("POST", "/api/tasks/bind_input"): (

@@ -56,6 +56,51 @@ class Api:
             return [self._describe_file(p) for p in found]
         raise FileNotFoundError(f"No such file or directory: {path}")
 
+    def list_shared_dir(self, subpath: str = "") -> dict:
+        """Non-recursive, single-level listing scoped under VIDGRID_SHARED_DIR
+        -- lets the picker navigate folder by folder instead of scan_path's
+        full recursive flatten, which finds every video under a path in one
+        shot but discards any sense of directory structure once they're all
+        in one flat list (fine for "scan this whole tree", not for browsing
+        it -- a shared downloads volume organized into per-batch/per-site
+        subfolders turned into one giant same-looking list of basenames).
+        Returns the folders and video files directly inside `subpath`, plus
+        the actual relative path resolved to (== subpath normally, but lets
+        the caller detect if e.g. a trailing garbage segment got dropped)."""
+        root = self.shared_dir()
+        if not root:
+            raise ValueError("No shared directory is configured")
+        root = os.path.realpath(root)
+        rel = (subpath or "").strip().strip("/\\")
+        target = os.path.realpath(os.path.join(root, rel)) if rel else root
+        if target != root and not target.startswith(root + os.sep):
+            raise ValueError("Path escapes the shared directory")
+        if not os.path.isdir(target):
+            raise NotADirectoryError(target)
+
+        dirs: list[dict] = []
+        files: list[dict] = []
+        with os.scandir(target) as it:
+            for entry in it:
+                try:
+                    if entry.is_dir(follow_symlinks=False):
+                        dirs.append({
+                            "name": entry.name,
+                            "path": os.path.relpath(entry.path, root).replace(os.sep, "/"),
+                        })
+                    elif os.path.splitext(entry.name)[1].lower() in VIDEO_EXTENSIONS:
+                        files.append(self._describe_file(entry.path))
+                except OSError:
+                    continue
+        dirs.sort(key=lambda d: d["name"].lower())
+        files.sort(key=lambda f: f["name"].lower())
+        resolved_rel = os.path.relpath(target, root).replace(os.sep, "/")
+        return {
+            "path": "" if resolved_rel == "." else resolved_rel,
+            "dirs": dirs,
+            "files": files,
+        }
+
     def _describe_file(self, path: str) -> dict:
         st = os.stat(path)
         return {

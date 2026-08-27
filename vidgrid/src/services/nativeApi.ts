@@ -16,6 +16,21 @@ export interface ScannedFile {
   token: string;
 }
 
+export interface SharedDirEntry {
+  /** Directory name (basename only). */
+  name: string;
+  /** Path relative to the shared dir root, e.g. "sub/nested" -- pass this
+   *  straight back into listSharedDir() to navigate into it. */
+  path: string;
+}
+
+export interface SharedDirListing {
+  /** The relative path actually listed (== the subpath argument, normalized). */
+  path: string;
+  dirs: SharedDirEntry[];
+  files: ScannedFile[];
+}
+
 async function call<T>(
   path: string,
   method: "GET" | "POST",
@@ -58,6 +73,15 @@ export const nativeApi = {
    */
   scanPath: (path: string) =>
     call<ScannedFile[]>("/api/scan_path", "POST", { path }),
+
+  /**
+   * Lists one level of the shared directory (folders + video files
+   * directly inside `subpath`, no recursion) -- for browsing it folder by
+   * folder instead of scanPath's full recursive flatten. `subpath` is
+   * relative to the shared dir root; "" lists the root itself.
+   */
+  listSharedDir: (subpath = "") =>
+    call<SharedDirListing>("/api/list_shared_dir", "POST", { subpath }),
 
   /**
    * Streams a browser-picked File's bytes to a local temp copy on the
