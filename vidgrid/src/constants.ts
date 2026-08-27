@@ -53,6 +53,11 @@ export const DEFAULTS: SavedOptions = {
   gridTemplate: undefined,
   galleryCount: 8,
   galleryOriginalResolution: true,
+  limitFitEnabled: false,
+  limitMaxSidePx: 12_000,
+  limitMaxMegapixels: 100,
+  limitMaxAnimMegapixels: 50,
+  limitMaxFileSizeMB: 25,
 };
 
 // Header layout

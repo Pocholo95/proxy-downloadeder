@@ -49,6 +49,57 @@ const isAbortError = (e: unknown): boolean => {
   return /abort/i.test(msg);
 };
 
+/** Floor below which JPEG output looks bad enough that it's not worth going lower. */
+const MIN_JPEG_QUALITY = 0.35;
+/** Floor below which WebP output looks bad enough that it's not worth going lower. */
+const MIN_WEBP_QUALITY = 20;
+/** Bounded so a big source (many frames) doesn't re-run ffmpeg encode too many times. */
+const MAX_FIT_ATTEMPTS = 6;
+
+/**
+ * Binary-searches the highest `quality` in [minQuality, startQuality] for
+ * which `encode(quality)` produces a blob ≤ targetBytes. `encode` is called
+ * at most `maxAttempts + 1` times. Used to fit both the static JPEG grid
+ * (cheap: re-encodes the same already-composed canvas) and the animated
+ * WebP grid (more expensive: re-runs ffmpeg over already-written frames,
+ * hence the lower attempt cap applied by callers).
+ *
+ * Returns the best blob found and whether it actually got under the target
+ * -- when even `minQuality` doesn't fit, the caller should warn the user
+ * rather than pretend it succeeded.
+ */
+async function fitEncodeToSize(
+  encode: (quality: number) => Promise<Blob>,
+  targetBytes: number,
+  startQuality: number,
+  minQuality: number,
+  maxAttempts: number,
+): Promise<{ blob: Blob; quality: number; underLimit: boolean }> {
+  const floorBlob = await encode(minQuality);
+  if (floorBlob.size > targetBytes) {
+    return { blob: floorBlob, quality: minQuality, underLimit: false };
+  }
+
+  let bestBlob = floorBlob;
+  let bestQuality = minQuality;
+  let lo = minQuality;
+  let hi = startQuality;
+
+  for (let i = 0; i < maxAttempts && hi - lo > 0.001 * Math.max(1, hi); i++) {
+    const mid = (lo + hi) / 2;
+    const blob = await encode(mid);
+    if (blob.size <= targetBytes) {
+      bestBlob = blob;
+      bestQuality = mid;
+      lo = mid;
+    } else {
+      hi = mid;
+    }
+  }
+
+  return { blob: bestBlob, quality: bestQuality, underLimit: true };
+}
+
 /** - GridRenderer Implementation */
 
 export class GridRenderer implements IGridRenderer {
@@ -257,13 +308,30 @@ export class GridRenderer implements IGridRenderer {
     await this.ffmpeg.reset();
 
     const outputName = `${file.name}.jpg`;
-    const jpgBlob = await new Promise<Blob>((resolve) => {
-      canvas.toBlob(
-        (b) => resolve(b ?? new Blob()),
-        "image/jpeg",
+    const encodeJpeg = (quality: number): Promise<Blob> =>
+      new Promise<Blob>((resolve) => {
+        canvas.toBlob((b) => resolve(b ?? new Blob()), "image/jpeg", quality);
+      });
+
+    let jpgBlob = await encodeJpeg(JPEG_QUALITY);
+    if (opts.maxFileSizeBytes && jpgBlob.size > opts.maxFileSizeBytes) {
+      const fit = await fitEncodeToSize(
+        encodeJpeg,
+        opts.maxFileSizeBytes,
         JPEG_QUALITY,
+        MIN_JPEG_QUALITY,
+        MAX_FIT_ATTEMPTS,
       );
-    });
+      jpgBlob = fit.blob;
+      if (!fit.underLimit) {
+        onWarning(
+          `Could not get under ${(opts.maxFileSizeBytes / 1_000_000).toFixed(0)}MB ` +
+            `even at the lowest quality (${Math.round(fit.quality * 100)}%) — ` +
+            `result: ${(jpgBlob.size / 1_000_000).toFixed(1)}MB. ` +
+            `Reduce width, columns, or rows to shrink it further.`,
+        );
+      }
+    }
     canvas.width = 0;
     canvas.height = 0;
     return { outputName, outputSize: jpgBlob.size, outputBlob: jpgBlob };
@@ -462,6 +530,27 @@ export class GridRenderer implements IGridRenderer {
         (ratio) => onEncodeProgress({ ratio, phase: encodePhase }),
       );
       outputExt = "mp4";
+    } else if (opts.maxFileSizeBytes) {
+      const fit = await this.fitAnimatedWebPToSize(
+        frameNames,
+        framesWritten,
+        opts.animFps,
+        opts.webpQuality,
+        opts.webpMethod,
+        opts.maxFileSizeBytes,
+        isCancelled,
+        (ratio) => onEncodeProgress({ ratio, phase: encodePhase }),
+      );
+      outputBlob = fit.blob;
+      if (!fit.underLimit) {
+        onWarning(
+          `Could not get under ${(opts.maxFileSizeBytes / 1_000_000).toFixed(0)}MB ` +
+            `even at the lowest WebP quality (${fit.quality}%) — ` +
+            `result: ${(fit.blob.size / 1_000_000).toFixed(1)}MB. ` +
+            `Reduce width, columns/rows, or animation duration to shrink it further.`,
+        );
+      }
+      outputExt = "webp";
     } else {
       outputBlob = await this.encodeAnimatedWebPFromFS(
         frameNames,
@@ -1485,7 +1574,13 @@ export class GridRenderer implements IGridRenderer {
     return results;
   }
 
-  private async encodeAnimatedWebPFromFS(
+  /**
+   * Encodes the already-written frame sequence into a single WebP blob at
+   * the given quality, WITHOUT deleting the source frame files -- so a
+   * caller fitting to a size target can call this again at a different
+   * quality without re-extracting/re-composing anything.
+   */
+  private async encodeAnimatedWebPOnce(
     frameNames: string[],
     totalFrames: number,
     fps: number,
@@ -1555,13 +1650,6 @@ export class GridRenderer implements IGridRenderer {
       log(`  [FFmpeg/AnimWebP] Encoding complete.`);
       onProgress(1.0);
 
-      for (const name of frameNames) {
-        try {
-          await this.ffmpeg.deleteFile(name);
-        } catch {
-          /* ignore */
-        }
-      }
       try {
         await this.ffmpeg.deleteFile(outputName);
       } catch {
@@ -1581,6 +1669,82 @@ export class GridRenderer implements IGridRenderer {
     } finally {
       this.ffmpeg.offProgress(progressHandler);
     }
+  }
+
+  /** Encodes once at a fixed quality, then deletes the source frame files. Unchanged existing behavior for callers that don't need to retry at another quality. */
+  private async encodeAnimatedWebPFromFS(
+    frameNames: string[],
+    totalFrames: number,
+    fps: number,
+    quality: number,
+    method: number,
+    isCancelled: () => boolean,
+    onProgress: (ratio: number) => void,
+  ): Promise<Blob> {
+    const blob = await this.encodeAnimatedWebPOnce(
+      frameNames,
+      totalFrames,
+      fps,
+      quality,
+      method,
+      isCancelled,
+      onProgress,
+    );
+    for (const name of frameNames) {
+      try {
+        await this.ffmpeg.deleteFile(name);
+      } catch {
+        /* ignore */
+      }
+    }
+    return blob;
+  }
+
+  /**
+   * Binary-searches WebP quality (bounded to a handful of ffmpeg re-encodes,
+   * since unlike the static JPEG case each attempt re-runs a real encode
+   * over the already-written frames rather than a cheap canvas re-draw) to
+   * fit the animated grid under maxFileSizeBytes. Always cleans up the
+   * source frame files itself once done, whichever quality was chosen.
+   */
+  private async fitAnimatedWebPToSize(
+    frameNames: string[],
+    totalFrames: number,
+    fps: number,
+    startQuality: number,
+    method: number,
+    targetBytes: number,
+    isCancelled: () => boolean,
+    onProgress: (ratio: number) => void,
+  ): Promise<{ blob: Blob; quality: number; underLimit: boolean }> {
+    const encode = (q: number): Promise<Blob> =>
+      this.encodeAnimatedWebPOnce(
+        frameNames,
+        totalFrames,
+        fps,
+        Math.round(q),
+        method,
+        isCancelled,
+        onProgress,
+      );
+
+    const fit = await fitEncodeToSize(
+      encode,
+      targetBytes,
+      startQuality,
+      MIN_WEBP_QUALITY,
+      4,
+    );
+
+    for (const name of frameNames) {
+      try {
+        await this.ffmpeg.deleteFile(name);
+      } catch {
+        /* ignore */
+      }
+    }
+
+    return { ...fit, quality: Math.round(fit.quality) };
   }
 }
 

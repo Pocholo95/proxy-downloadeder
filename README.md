@@ -574,6 +574,35 @@ subido solo si vive dentro del directorio de subidas del propio backend,
 nunca si es un archivo escaneado por path (esos son tuyos, nunca se
 tocan).
 
+### Ajuste automático a límites de subida
+
+Cada host de subida publica sus propios límites (tamaño máximo de lado,
+megapíxeles, tamaño de archivo). En **Salida → Grilla estática** o
+**Grilla animada**, el toggle **"Fit to upload limits"** los toma como
+input y arma el resultado para que entre sin retocar nada a mano:
+
+- Bajás el **ancho de salida** que ya configuraste, nunca lo sube: busca
+  (búsqueda binaria, no una fórmula recalculada a mano) el ancho más
+  grande que aún respeta el lado máximo y los megapíxeles totales — para
+  animado, megapíxeles × cantidad de frames, que es como los hosts miden
+  "animated images" — reusando las mismas funciones de layout que ya usa
+  el renderer (`getGridLayout`/`computeAnimationEstimate` en
+  `src/gridUtils.ts`) en vez de reimplementar esa geometría.
+- Si el resultado sigue pesando más que el tamaño máximo, baja la calidad
+  JPEG (grilla estática, re-encode barato sobre el mismo canvas ya
+  compuesto) o WebP (grilla animada, re-encode de ffmpeg sobre los frames
+  ya escritos, sin volver a extraerlos) hasta encontrar la más alta que
+  entra. Si ni al piso de calidad entra, no lo oculta: te avisa con el
+  tamaño real resultante para que ajustes ancho/columnas/filas/duración
+  vos mismo.
+- **No cubre MP4** — ni tiene un control de calidad expuesto para
+  ajustarlo, ni suele estar en las listas de formatos aceptados de estos
+  hosts (JPEG/PNG/GIF/WebP sí, MP4 no). Si elegís salida animada en MP4
+  con el toggle activo, se avisa en la UI que no va a tener efecto — pasá
+  a WebP.
+- Tampoco cubre Secuencia ni Galería por ahora — el toggle solo aparece
+  en Grilla estática/animada.
+
 ### Limpieza automática por inactividad
 
 Corriendo 24/7, dos cosas se acumulan si nunca se limpian solas: cada

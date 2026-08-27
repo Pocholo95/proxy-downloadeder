@@ -558,6 +558,43 @@ export const computeAnimationEstimate = (
 };
 
 /**
+ * Finds the largest output width (≤ desiredWidth, ≥ minWidth) for which
+ * `fits(width)` returns true, via binary search.
+ *
+ * `fits` is expected to be monotonic (wider canvas → more pixels → more
+ * likely to fail), which holds for grid layouts since canvasWidth scales
+ * 1:1 with the input width and canvasHeight scales with it too (see
+ * computeTemplatePixelRects) -- so this never needs to re-derive that
+ * geometry itself, just probe it via the real layout functions.
+ *
+ * Returns `desiredWidth` unchanged when it already fits, and `minWidth`
+ * when even the floor doesn't fit (caller decides whether to warn).
+ *
+ * @param desiredWidth - The width the user actually configured.
+ * @param minWidth - Floor width to never go below (e.g. MIN_CELL_WIDTH).
+ * @param fits - Predicate: does this candidate width satisfy the limits?
+ * @returns The largest width in [minWidth, desiredWidth] that fits.
+ */
+export const findMaxWidthWithinLimits = (
+  desiredWidth: number,
+  minWidth: number,
+  fits: (width: number) => boolean,
+): number => {
+  if (desiredWidth <= minWidth) return desiredWidth;
+  if (fits(desiredWidth)) return desiredWidth;
+  if (!fits(minWidth)) return minWidth;
+
+  let lo = minWidth;
+  let hi = desiredWidth;
+  while (hi - lo > 1) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (fits(mid)) lo = mid;
+    else hi = mid;
+  }
+  return lo;
+};
+
+/**
  * Calculates evenly distributed sample timestamps across a time range with margins.
  *
  * @param totalCells - Number of thumbnail cells to generate

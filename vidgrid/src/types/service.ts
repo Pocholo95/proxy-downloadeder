@@ -167,6 +167,13 @@ export interface CellExtractionOptions {
   gridTemplate: GridTemplate | undefined;
   /** User-supplied timestamps to extract frames at, or undefined for auto-spaced */
   customTimestamps: number[] | undefined;
+  /**
+   * When set, the renderer iteratively lowers JPEG/WebP quality (re-encoding
+   * from the already-composed canvas/frames, no re-extraction) to try to
+   * bring the output under this many bytes. Ignored for MP4 output, which
+   * has no exposed quality knob. Undefined disables the loop entirely.
+   */
+  maxFileSizeBytes?: number;
 }
 
 /** Static JPEG grid rendering options */

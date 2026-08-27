@@ -384,13 +384,22 @@ export function useBatchProcessor() {
             (outputMode === "animated" || outputMode === "sequence") &&
             res.outputBlob
           ) {
+            // Use the width the renderer actually used (animGridOpts.width
+            // for "animated" may be narrower than opts.width when Fit to
+            // upload limits clamped it -- seqOpts.width is never clamped,
+            // Sequence isn't in scope for that feature), so this summary
+            // matches the real output instead of the pre-clamp settings.
+            const actualWidth =
+              (outputMode === "animated" ? animGridOpts.width : seqOpts.width) ??
+              opts.width ??
+              DEFAULTS.width!;
             outputAnimationInfo = item.metadata
               ? (computeAnimationEstimate(item.metadata, {
                   outputMode,
                   animSegments: opts.animSegments ?? DEFAULTS.animSegments!,
                   animDuration: opts.animDuration ?? DEFAULTS.animDuration!,
                   animFps: opts.animFps ?? DEFAULTS.animFps!,
-                  width: opts.width ?? DEFAULTS.width!,
+                  width: actualWidth,
                   cols: opts.cols ?? DEFAULTS.cols!,
                   rows: opts.rows ?? DEFAULTS.rows!,
                   spacing: opts.spacing ?? DEFAULTS.spacing!,

@@ -442,6 +442,24 @@ export type SavedOptions = {
    * video resolution instead of resizing to the configured output width.
    */
   galleryOriginalResolution?: boolean;
+  /**
+   * When true, Static Grid and Animated Grid (WebP) output is automatically
+   * kept within limitMaxSidePx/limitMaxMegapixels/limitMaxAnimMegapixels by
+   * reducing the effective output width, and within limitMaxFileSizeMB by
+   * lowering JPEG/WebP quality -- so the result can be uploaded directly to
+   * a host with published size limits without manual trial and error.
+   * Does not affect Sequence or Gallery mode, and cannot help MP4 output
+   * (no quality/size knob exists for the MP4 encode path).
+   */
+  limitFitEnabled?: boolean;
+  /** Max pixels allowed on the longer side of the output canvas. */
+  limitMaxSidePx?: number;
+  /** Max total megapixels (width × height) for Static Grid output. */
+  limitMaxMegapixels?: number;
+  /** Max total megapixels across all frames (width × height × frames) for Animated Grid output. */
+  limitMaxAnimMegapixels?: number;
+  /** Max output file size in megabytes. */
+  limitMaxFileSizeMB?: number;
 };
 
 /** Named preset configurations, keyed by display name. */

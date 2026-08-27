@@ -39,6 +39,12 @@ export default function OutputModesSection({
   const isAnimated = outputMode === "animated" || outputMode === "sequence";
   const isSequence = outputMode === "sequence";
   const isGallery = outputMode === "gallery";
+  // Fit-to-limits only covers the two grid image outputs (Static/Animated) --
+  // Sequence and Gallery aren't the "thumbnail grid you upload somewhere"
+  // case this feature targets, and Sequence's video-with-audio path has no
+  // quality knob to shrink at all.
+  const showLimitFit = outputMode === "static" || outputMode === "animated";
+  const limitFitEnabled = opts.limitFitEnabled ?? DEFAULTS.limitFitEnabled;
   const isVideoWithAudio =
     isSequence &&
     (opts.sequenceMode ?? DEFAULTS.sequenceMode) === "video_with_audio";
@@ -290,6 +296,124 @@ export default function OutputModesSection({
               </PopoverContent>
             </Popover>
           </Field>
+        </div>
+      )}
+
+      {/* Fit-to-upload-limits - static/animated grid only */}
+      {showLimitFit && (
+        <div className="bg-muted/30 flex flex-col gap-3 rounded-md border p-3">
+          <Field orientation="horizontal">
+            <Switch
+              id="cp-chk-limit-fit"
+              label="Fit to upload limits"
+              checked={limitFitEnabled}
+              onCheckedChange={(checked) =>
+                setOpts({ ...opts, limitFitEnabled: checked === true })
+              }
+            />
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className="size-6 flex items-center justify-center rounded-full text-muted-foreground hover:text-foreground transition-colors"
+                  aria-label="About Fit to upload limits"
+                >
+                  <Info className="size-4" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="max-w-72 text-xs leading-relaxed">
+                <p className="font-medium mb-1">Fit to upload limits</p>
+                <p>
+                  When enabled, the output width is automatically reduced (never
+                  increased) so the canvas stays within the max side/megapixel
+                  limits below, and quality is lowered as needed to stay under
+                  the max file size. If it can't get under the size limit even
+                  at the lowest quality, you'll get a warning after generation
+                  instead of a silently oversized file.
+                </p>
+                <p className="mt-1">
+                  Not available for MP4 output — it has no quality control to
+                  shrink with. Switch Output format to WebP for animated grids.
+                </p>
+              </PopoverContent>
+            </Popover>
+          </Field>
+
+          {limitFitEnabled && (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field>
+                <FieldLabel htmlFor="cp-limit-side">Max side (px)</FieldLabel>
+                <RangeNumberInput
+                  id="cp-limit-side"
+                  value={opts.limitMaxSidePx ?? DEFAULTS.limitMaxSidePx!}
+                  min={480}
+                  max={12_000}
+                  onChange={(v) => setOpts({ ...opts, limitMaxSidePx: v })}
+                  unbounded
+                  hardMin={240}
+                  hardMax={50_000}
+                />
+              </Field>
+              {outputMode === "static" ? (
+                <Field>
+                  <FieldLabel htmlFor="cp-limit-mp">Max megapixels</FieldLabel>
+                  <RangeNumberInput
+                    id="cp-limit-mp"
+                    value={opts.limitMaxMegapixels ?? DEFAULTS.limitMaxMegapixels!}
+                    min={1}
+                    max={100}
+                    onChange={(v) => setOpts({ ...opts, limitMaxMegapixels: v })}
+                    unbounded
+                    hardMin={1}
+                    hardMax={1000}
+                  />
+                </Field>
+              ) : (
+                <Field>
+                  <FieldLabel htmlFor="cp-limit-anim-mp">
+                    Max megapixels (all frames)
+                  </FieldLabel>
+                  <RangeNumberInput
+                    id="cp-limit-anim-mp"
+                    value={
+                      opts.limitMaxAnimMegapixels ?? DEFAULTS.limitMaxAnimMegapixels!
+                    }
+                    min={1}
+                    max={50}
+                    onChange={(v) =>
+                      setOpts({ ...opts, limitMaxAnimMegapixels: v })
+                    }
+                    unbounded
+                    hardMin={1}
+                    hardMax={1000}
+                  />
+                </Field>
+              )}
+              <Field>
+                <FieldLabel htmlFor="cp-limit-mb">Max file size (MB)</FieldLabel>
+                <RangeNumberInput
+                  id="cp-limit-mb"
+                  value={opts.limitMaxFileSizeMB ?? DEFAULTS.limitMaxFileSizeMB!}
+                  min={1}
+                  max={25}
+                  onChange={(v) => setOpts({ ...opts, limitMaxFileSizeMB: v })}
+                  suffix="MB"
+                  unbounded
+                  hardMin={1}
+                  hardMax={5000}
+                />
+              </Field>
+            </div>
+          )}
+
+          {limitFitEnabled &&
+            outputMode === "animated" &&
+            opts.animFormat === "mp4" && (
+              <p className="text-xs text-amber-600 dark:text-amber-400">
+                Output format is MP4 — these limits won't be enforced. Switch
+                to WebP for a shrinkable animated output.
+              </p>
+            )}
         </div>
       )}
     </Section>

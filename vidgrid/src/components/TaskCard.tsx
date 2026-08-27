@@ -5,6 +5,7 @@ import { useUiStore, selectTotalCells } from "@/store/uiStore";
 import { useSettingsStore } from "@/store/settingsStore";
 import { DEFAULTS } from "@/constants";
 import { computeAnimationEstimate } from "@/gridUtils";
+import { clampWidthForUploadLimits } from "@/gridOptions";
 import { isItemUploadEligible } from "@/uploadUtils";
 import { formatElapsed } from "@/utils";
 import { useTick } from "@/lib/useTick";
@@ -96,12 +97,24 @@ export default function TaskCard({
         ? item.completedOutputMode
         : (opts.outputMode ?? "static");
     if (mode !== "animated" && mode !== "sequence") return null;
+    // Sequence isn't in scope for Fit to upload limits, so its width is
+    // never clamped here -- only "animated" mirrors what buildAnimatedGridOptions
+    // will actually pick, so this preview doesn't show pre-clamp numbers.
+    const previewWidth =
+      mode === "animated"
+        ? clampWidthForUploadLimits(
+            opts,
+            item.metadata,
+            opts.width ?? DEFAULTS.width!,
+            true,
+          )
+        : (opts.width ?? DEFAULTS.width!);
     return computeAnimationEstimate(item.metadata, {
       outputMode: opts.outputMode ?? "static",
       animSegments: opts.animSegments ?? DEFAULTS.animSegments!,
       animDuration: opts.animDuration ?? DEFAULTS.animDuration!,
       animFps: opts.animFps ?? DEFAULTS.animFps!,
-      width: opts.width ?? DEFAULTS.width!,
+      width: previewWidth,
       cols: opts.cols ?? DEFAULTS.cols!,
       rows: opts.rows ?? DEFAULTS.rows!,
       spacing: opts.spacing ?? DEFAULTS.spacing!,
