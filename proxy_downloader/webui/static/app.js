@@ -164,10 +164,23 @@ const EXTENSION_DELETABLE = new Set(["done", "done_with_errors", "error", "cance
 // genuinely mid-download still redraws each tick, since its own numbers
 // are genuinely changing -- there's no getting around that without a much
 // heavier per-field DOM diff.
-const _lastListHTML = new Map();
+//
+// Tracked per DOM element (not per key): some elements are reused across
+// several logical "views" that share one key namespace but aren't the same
+// content -- the files list is keyed by path, the activity list by filter.
+// Keying the cache by that string alone breaks navigating back to a view
+// whose content happens to be byte-identical to what it was last time:
+// e.g. folder A hasn't changed, so re-entering it after visiting folder B
+// would compare against A's own last-rendered html, match, and skip the
+// render entirely -- even though the DOM is currently showing B, not A.
+// Storing {key, html} together and requiring BOTH to match is what makes a
+// bare key change (a different path/filter) always force a real render,
+// while still skipping a plain unchanged poll of the same current view.
+const _lastRendered = new Map();
 function updateListHTML(el, key, html) {
-  if (_lastListHTML.get(key) === html) return false;
-  _lastListHTML.set(key, html);
+  const last = _lastRendered.get(el);
+  if (last && last.key === key && last.html === html) return false;
+  _lastRendered.set(el, { key, html });
   el.innerHTML = html;
   return true;
 }
