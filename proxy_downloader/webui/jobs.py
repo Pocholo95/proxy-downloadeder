@@ -84,14 +84,22 @@ class _JobLogWriter:
 
 
 class Job:
-    def __init__(self, job_id, kind, raw_input, output_dir, proxy_mode, speed):
+    def __init__(self, job_id, kind, raw_input, output_dir, proxy_mode, speed, hold=False):
         self.id = job_id
         self.kind = kind                # "file" | "folder" | "batch"
         self.raw_input = raw_input
         self.output_dir = output_dir
         self.proxy_mode = proxy_mode    # "auto" | "proxy" | "no-proxy"
         self.speed = speed
-        self.status = "queued"          # queued|resolving|fetching_proxies|running|cancelling|done|done_with_errors|error|cancelled
+        self.status = "queued"          # queued|resolving|held|fetching_proxies|running|cancelling|done|done_with_errors|error|cancelled
+        # One-shot: makes the worker stop right after resolving (items
+        # populated, nothing downloaded yet) instead of proceeding straight
+        # to the proxy pool/download loop -- a jDownloader-style "Linkgrabber"
+        # step, so a big pasted batch can be reviewed/pruned before
+        # committing any of it. Consumed (reset False) the first time the
+        # job actually runs, so start_held_job()'s re-queue proceeds through
+        # to a real download instead of holding again.
+        self.hold = hold
         self.error = None
         self.retry_of = None            # id of the job this one retries, if any
         self.created_at = time.time()
@@ -262,7 +270,7 @@ class JobManager:
         self.order = keep
 
     # ── jobs ──
-    def create_job(self, kind, value, output_dir=None, proxy_mode="auto", speed=None):
+    def create_job(self, kind, value, output_dir=None, proxy_mode="auto", speed=None, hold=False):
         if kind not in ("file", "folder", "batch", "auto"):
             raise ValueError("kind must be file, folder, batch or auto")
         if not value or not value.strip():
@@ -272,7 +280,7 @@ class JobManager:
 
         out_dir = Path(output_dir).expanduser() if output_dir else self.base_output_dir
         job_id = uuid.uuid4().hex[:12]
-        job = Job(job_id, kind, value.strip(), str(out_dir), proxy_mode, speed or MIN_SPEED_KB)
+        job = Job(job_id, kind, value.strip(), str(out_dir), proxy_mode, speed or MIN_SPEED_KB, hold=hold)
 
         with self._meta_lock:
             self.jobs[job_id] = job
@@ -294,7 +302,7 @@ class JobManager:
         if not job:
             return False
         with job.lock:
-            if job.status == "queued":
+            if job.status in ("queued", "held"):
                 job.status = "cancelled"
                 job.finished_at = time.time()
             elif job.status in ("resolving", "fetching_proxies", "running"):
@@ -305,12 +313,46 @@ class JobManager:
         self._persist()
         return True
 
+    def start_held_job(self, job_id):
+        """Releases a job that was resolved-and-parked via hold=True (the
+        Linkgrabber-style "solo agregar" mode) into the real download queue.
+        Reuses the items already found while resolving instead of
+        re-resolving from scratch -- same _preset_items hand-off retry_job()
+        uses, rebuilt with _mk_item() since a reloaded-from-disk job's items
+        lost their live `provider` object reference (stripped before
+        persisting, same as to_dict() always does)."""
+        job = self.jobs.get(job_id)
+        if not job:
+            raise ValueError("Job not found")
+        with job.lock:
+            if job.status != "held":
+                raise ValueError("Este trabajo no está en espera")
+            raw_items = [dict(it) for it in job.items]
+
+        preset = []
+        for it in raw_items:
+            provider = it.get("provider") or registry.get(it["site"])
+            if not provider:
+                continue
+            preset.append(self._mk_item(provider, it["file_id"], it.get("hint_name"), it["dest_dir"]))
+        if not preset:
+            raise ValueError("No se pudo reconstruir ningún archivo de este trabajo")
+
+        with self._meta_lock:
+            self._preset_items[job.id] = preset
+        with job.lock:
+            job.status = "queued"
+            job.items = preset
+        self._persist()
+        self._queue.put(job.id)
+        return job
+
     def delete_job(self, job_id):
         with self._meta_lock:
             job = self.jobs.get(job_id)
             if not job:
                 return False
-            if job.status not in TERMINAL_STATUSES:
+            if job.status not in TERMINAL_STATUSES and job.status != "held":
                 raise ValueError("Cancelá el trabajo antes de borrarlo")
             del self.jobs[job_id]
             self.order.remove(job_id)
@@ -401,6 +443,13 @@ class JobManager:
                     job.status = "error"
                     job.error = job.error or "No se encontraron archivos para descargar"
                     job.finished_at = time.time()
+                self._persist()
+                return
+
+            if job.hold:
+                with job.lock:
+                    job.status = "held"
+                    job.hold = False
                 self._persist()
                 return
 

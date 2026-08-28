@@ -106,10 +106,11 @@ def api_create_job():
     output_dir = data.get("output_dir") or None
     proxy_mode = data.get("proxy_mode", "auto")
     speed = data.get("speed")
+    hold = bool(data.get("hold"))
     try:
         speed = int(speed) if speed not in (None, "") else None
         job = manager.create_job(kind, value, output_dir=output_dir,
-                                  proxy_mode=proxy_mode, speed=speed)
+                                  proxy_mode=proxy_mode, speed=speed, hold=hold)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     return jsonify(job.to_dict()), 201
@@ -146,6 +147,15 @@ def api_retry_job(job_id):
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     return jsonify(job.to_dict()), 201
+
+
+@app.post("/api/jobs/<job_id>/start")
+def api_start_held_job(job_id):
+    try:
+        job = manager.start_held_job(job_id)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify(job.to_dict())
 
 
 @app.delete("/api/jobs/<job_id>")

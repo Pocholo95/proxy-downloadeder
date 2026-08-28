@@ -282,6 +282,19 @@ vez terminado — o **"limpiar completados"** para vaciar todo lo terminado de
 una. El historial también se poda solo, guardando como mucho los últimos 300
 trabajos.
 
+En "Archivo / Carpeta" y "Batch" hay un checkbox **"Solo agregar, no
+descargar todavía"** (estilo el Linkgrabber de jDownloader): con eso tildado,
+el trabajo resuelve el link/carpeta/batch (encuentra los archivos reales,
+sin bajar ningún byte) y se queda parqueado en estado **"en espera"** —
+categoría propia en el sidebar — en vez de arrancar la descarga solo.
+Elegís ahí mismo cuáles iniciar (uno por uno con el botón ▶, o varios de
+una con selección múltiple + "Iniciar" en la barra de acciones), reusando
+los archivos ya encontrados en vez de resolver de nuevo. Es por-trabajo, no
+por-archivo-individual dentro de una carpeta resuelta (una carpeta con 20
+archivos se inicia o se deja en espera completa, no archivo por archivo) —
+y por ahora solo existe para el motor de descarga por sitio (`jobs.py`),
+no para video/extensión/subidas.
+
 La sección "Archivos" es un mini explorador de `/downloads`: navegás
 subcarpetas, bajás un archivo suelto o una carpeta entera (zip al vuelo),
 **renombrás** (botón "✏ Renombrar", pide el nombre nuevo; rechaza `.`/`..`

@@ -31,6 +31,7 @@ const els = {
   refreshFilesBtn: document.getElementById("refresh-files-btn"),
   bulkBar: document.getElementById("bulk-bar"),
   bulkCount: document.getElementById("bulk-count"),
+  bulkStart: document.getElementById("bulk-start"),
   bulkRetry: document.getElementById("bulk-retry"),
   bulkCancel: document.getElementById("bulk-cancel"),
   bulkDelete: document.getElementById("bulk-delete"),
@@ -44,6 +45,7 @@ const els = {
   sbUlSpeed: document.getElementById("sb-ulspeed"),
   sbActive: document.getElementById("sb-active"),
   sbQueued: document.getElementById("sb-queued"),
+  sbHeld: document.getElementById("sb-held"),
   sbDone: document.getElementById("sb-done"),
   sbError: document.getElementById("sb-error"),
   sbStatusMsg: document.getElementById("sb-status-msg"),
@@ -56,6 +58,8 @@ const els = {
   fieldBatch: document.getElementById("field-batch"),
   fieldVideo: document.getElementById("field-video"),
   fieldMinSpeed: document.getElementById("field-min-speed"),
+  fieldHold: document.getElementById("field-hold"),
+  holdMode: document.getElementById("hold-mode"),
   inputSingle: document.getElementById("value-single"),
   inputBatch: document.getElementById("value-batch"),
   inputVideo: document.getElementById("value-video"),
@@ -169,6 +173,7 @@ function updateListHTML(el, key, html) {
 const STATUS_LABELS = {
   queued: "en cola",
   resolving: "resolviendo",
+  held: "en espera",
   fetching_proxies: "cargando proxies",
   running: "descargando",
   cancelling: "cancelando…",
@@ -181,9 +186,12 @@ const STATUS_LABELS = {
   uploading: "subiendo",
 };
 
-// Maps a raw status string to one of the 5 visual pill styles.
+// Maps a raw status string to one of the 5 visual pill styles. "held" reuses
+// the warn/yellow style -- like done_with_errors and cancelling, it's a
+// state that wants the user's attention/action, not passive progress.
 function statusPillClass(status) {
   if (status === "queued" || status === "cancelled") return "st-queued";
+  if (status === "held") return "st-warn";
   if (["resolving", "fetching_proxies", "running", "cancelling", "downloading", "uploading"].includes(status)) return "st-active";
   if (status === "done") return "st-done";
   if (status === "done_with_errors") return "st-warn";
@@ -191,9 +199,14 @@ function statusPillClass(status) {
   return "st-queued";
 }
 
-const CANCELLABLE_STATUSES = new Set(["queued", "resolving", "fetching_proxies", "running"]);
+// Held jobs are cancellable (discard before ever downloading) and directly
+// deletable (no need to cancel first -- nothing is actually in flight) the
+// same way a queued job is, but must NOT be swept up by "Cancelar activos"
+// in the toolbar (see that handler) since holding one is a deliberate
+// "not yet" the user shouldn't have undone out from under them in bulk.
+const CANCELLABLE_STATUSES = new Set(["queued", "held", "resolving", "fetching_proxies", "running"]);
 const RETRYABLE_STATUSES = new Set(["done_with_errors", "error", "cancelled"]);
-const DELETABLE_STATUSES = new Set(["done", "done_with_errors", "error", "cancelled"]);
+const DELETABLE_STATUSES = new Set(["done", "done_with_errors", "error", "cancelled", "held"]);
 const VIDEO_CANCELLABLE = new Set(["queued", "running"]);
 const VIDEO_DELETABLE = new Set(["done", "error", "cancelled"]);
 const EXTENSION_CANCELLABLE = new Set(["queued", "downloading"]);
@@ -224,6 +237,8 @@ const ICONS = {
   upload: '<svg class="kind-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21V8M6 13l6-6 6 6"/><path d="M4 21h16"/></svg>',
 };
 const CHEVRON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M9 6l6 6-6 6"/></svg>';
+const PLAY_ICON = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+const HOLD_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>';
 
 // ═══════════════════════════════════════════════════════════════════════
 // Add-task modal — tabs mirror the 4 old always-visible sidebar tabs, just
@@ -243,6 +258,10 @@ function setModalKind(kind) {
   els.fieldUpload.classList.toggle("hidden", !isUpload);
   els.downloadOptionsRow.classList.toggle("hidden", isUpload);
   els.fieldMinSpeed.classList.toggle("hidden", isVideo);
+  // Hold ("solo agregar, no descargar todavía") only exists for the site-
+  // download engine (jobs.py) -- yt-dlp/uploads have no resolve-then-park
+  // step to hold at.
+  els.fieldHold.classList.toggle("hidden", isVideo || isUpload);
   els.submitBtn.textContent = isUpload ? "Subir" : "Descargar";
   if (isUpload) refreshUploadSites();
 }
@@ -316,6 +335,7 @@ els.form.addEventListener("submit", async (e) => {
     output_dir: els.outputDir.value.trim() || null,
     proxy_mode: els.proxyMode.value,
     speed: els.minSpeed.value || null,
+    hold: els.holdMode.checked,
   };
   try {
     await fetchJSON("/api/jobs", {
@@ -325,6 +345,7 @@ els.form.addEventListener("submit", async (e) => {
     });
     els.inputSingle.value = "";
     els.inputBatch.value = "";
+    els.holdMode.checked = false;
     closeModal();
     refreshTasks();
   } catch (err) {
@@ -370,6 +391,7 @@ function normalizeDownloadEntry(job) {
     cancellable: CANCELLABLE_STATUSES.has(job.status),
     retryable: RETRYABLE_STATUSES.has(job.status) && hasFailed,
     deletable: DELETABLE_STATUSES.has(job.status),
+    startable: job.status === "held",
     createdAt: job.created_at,
     children: items.length > 1 ? items.map((it) => ({
       name: it.filename || it.hint_name || it.file_id, site: it.site,
@@ -517,6 +539,7 @@ let _lastEntries = new Map(); // uid -> entry, for bulk/row action lookups
 
 function statusBucket(status) {
   if (status === "queued") return "queued";
+  if (status === "held") return "held";
   if (["resolving", "fetching_proxies", "running", "cancelling", "downloading", "uploading"].includes(status)) return "active";
   if (status === "done") return "done";
   if (status === "error" || status === "done_with_errors") return "error";
@@ -524,7 +547,7 @@ function statusBucket(status) {
 }
 
 function buildSidebarCounts(entries) {
-  const c = { all: entries.length, downloads: 0, video: 0, extension: 0, uploads: 0, queued: 0, active: 0, done: 0, error: 0 };
+  const c = { all: entries.length, downloads: 0, video: 0, extension: 0, uploads: 0, held: 0, queued: 0, active: 0, done: 0, error: 0 };
   const bySite = {};
   for (const e of entries) {
     c[e.engineKind] = (c[e.engineKind] || 0) + 1;
@@ -561,6 +584,7 @@ function buildSidebar(entries) {
   html += `<div class="side-group"><div class="side-heading">Tareas</div>`;
   html += sideItem("downloads", "Descargas", c.downloads, ICONS.folder);
   for (const s of downloadSites) html += sideItem("downloads:" + s, siteSwatch(s) + s, bySite["downloads:" + s], "", true);
+  html += sideItem("st:held", "En espera", c.held, HOLD_ICON);
   html += sideItem("video", "Video (yt-dlp)", c.video, ICONS.video);
   html += sideItem("extension", "Extensión", c.extension, ICONS.ext);
   html += sideItem("uploads", "Subidas", c.uploads, ICONS.upload);
@@ -603,6 +627,7 @@ function entryMatches(e) {
   if (v === "downloads" || v === "video" || v === "extension" || v === "uploads") return e.engineKind === v;
   if (v.startsWith("downloads:")) return e.engineKind === "downloads" && e.sites.includes(v.slice(10));
   if (v.startsWith("uploads:")) return e.engineKind === "uploads" && e.sites.includes(v.slice(8));
+  if (v === "st:held") return statusBucket(e.status) === "held";
   if (v === "st:queued") return statusBucket(e.status) === "queued";
   if (v === "st:active") return statusBucket(e.status) === "active";
   if (v === "st:done") return statusBucket(e.status) === "done";
@@ -632,6 +657,7 @@ function rowActionsHtml(entry) {
   if (entry.fileditchCount > 0) links.push(`<button type="button" class="rlink" data-action="copy-fileditch" data-uid="${entry.uid}">FileDitch ×${entry.fileditchCount}</button>`);
 
   const icons = [];
+  if (entry.startable) icons.push(`<button type="button" class="ricon" data-action="start" data-uid="${entry.uid}" title="Iniciar descarga">${PLAY_ICON}</button>`);
   if (entry.cancellable) icons.push(`<button type="button" class="ricon" data-action="cancel" data-uid="${entry.uid}" title="Cancelar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6 6 18"/></svg></button>`);
   if (entry.retryable) icons.push(`<button type="button" class="ricon" data-action="retry" data-uid="${entry.uid}" title="Reintentar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 4v5h5M20 20v-5h-5"/><path d="M5.5 9a7 7 0 0 1 12.3-2.5M18.5 15a7 7 0 0 1-12.3 2.5"/></svg></button>`);
   if (entry.deletable) icons.push(`<button type="button" class="ricon" data-action="delete" data-uid="${entry.uid}" title="Quitar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button>`);
@@ -768,6 +794,10 @@ async function cancelEntry(entry) {
   if (!entry.cancellable) return;
   await fetch(`${entry.apiBase}/${entry.id}/cancel`, { method: "POST" });
 }
+async function startEntry(entry) {
+  if (!entry.startable) return;
+  try { await fetchJSON(`${entry.apiBase}/${entry.id}/start`, { method: "POST" }); } catch (err) { alert(err.message); }
+}
 async function retryEntry(entry) {
   if (entry.engineKind === "uploads") {
     for (const job of entry.rawJobs) {
@@ -799,6 +829,12 @@ els.taskBody.addEventListener("click", async (e) => {
     const entry = _lastEntries.get(btn.dataset.uid);
     const links = entry ? entry.rawJobs.filter((j) => j.site === "fileditch" && j.url).map((j) => j.url) : [];
     copyToClipboard(links.join("\n"), btn);
+  } else if (action === "start") {
+    const entry = _lastEntries.get(btn.dataset.uid);
+    if (!entry) return;
+    btn.disabled = true;
+    await startEntry(entry);
+    refreshTasks();
   } else if (action === "cancel") {
     const entry = _lastEntries.get(btn.dataset.uid);
     if (!entry) return;
@@ -828,6 +864,10 @@ function selectedEntries() {
   return [...state.selected].map((uid) => _lastEntries.get(uid)).filter(Boolean);
 }
 
+els.bulkStart.addEventListener("click", async () => {
+  for (const entry of selectedEntries()) if (entry.startable) await startEntry(entry);
+  refreshTasks();
+});
 els.bulkRetry.addEventListener("click", async () => {
   for (const entry of selectedEntries()) if (entry.retryable) await retryEntry(entry);
   refreshTasks();
@@ -846,7 +886,11 @@ els.bulkDelete.addEventListener("click", async () => {
 });
 
 els.btnCancelActive.addEventListener("click", async () => {
-  const targets = [..._lastEntries.values()].filter((e) => e.cancellable);
+  // Held jobs are cancellable (so the row/bulk-selection X still works on
+  // them) but deliberately excluded here -- "en espera" means the user
+  // parked it on purpose, so a blanket "cancel everything active" shouldn't
+  // sweep it away too.
+  const targets = [..._lastEntries.values()].filter((e) => e.cancellable && e.status !== "held");
   if (!targets.length) return;
   if (!confirm(`¿Cancelar ${targets.length} tarea(s) activa(s)/en cola?`)) return;
   await Promise.all(targets.map(cancelEntry));
@@ -870,6 +914,7 @@ function updateStatusBar(entries) {
   const { c } = buildSidebarCounts(entries);
   els.sbActive.textContent = c.active;
   els.sbQueued.textContent = c.queued;
+  els.sbHeld.textContent = c.held;
   els.sbDone.textContent = c.done;
   els.sbError.textContent = c.error;
 
@@ -888,7 +933,7 @@ function updateStatusBar(entries) {
 
 const VIEW_TITLES = {
   all: "Todo", downloads: "Descargas", video: "Video (yt-dlp)", extension: "Extensión", uploads: "Subidas",
-  "st:queued": "En cola", "st:active": "Activos", "st:done": "Completados", "st:error": "Con error",
+  "st:held": "En espera", "st:queued": "En cola", "st:active": "Activos", "st:done": "Completados", "st:error": "Con error",
   "view:files": "Archivos", "view:sites": "Sitios y proxies",
 };
 function viewTitle() {

@@ -48,6 +48,7 @@
       <div class="bulk-bar" id="bulk-bar">
         <span><span class="count" id="bulk-count">0</span> seleccionadas</span>
         <div class="tb-spacer"></div>
+        <button type="button" class="tbtn ghost" id="bulk-start"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>Iniciar</button>
         <button type="button" class="tbtn ghost" id="bulk-retry"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 4v5h5M20 20v-5h-5"/><path d="M5.5 9a7 7 0 0 1 12.3-2.5M18.5 15a7 7 0 0 1-12.3 2.5"/></svg>Reintentar</button>
         <button type="button" class="tbtn ghost" id="bulk-cancel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6 6 18"/></svg>Cancelar</button>
         <button type="button" class="tbtn ghost" id="bulk-delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>Quitar</button>
@@ -139,6 +140,7 @@
       <div class="tb-sep"></div>
       <div class="sb-item">activos <b class="num" id="sb-active">0</b></div>
       <div class="sb-item">en cola <b class="num" id="sb-queued">0</b></div>
+      <div class="sb-item">en espera <b class="num" id="sb-held">0</b></div>
       <div class="sb-item">completados <b class="num" id="sb-done">0</b></div>
       <div class="sb-item">con error <b class="num" id="sb-error">0</b></div>
       <div class="sb-spacer"></div>
@@ -182,6 +184,14 @@ https://www.mediafire.com/file/XXXXXXX/nombre/file
 
 folder:
 https://1fichier.com/?XXXXXXXXX"></textarea>
+          </div>
+
+          <div class="field-check hidden" id="field-hold">
+            <label class="check-label">
+              <input type="checkbox" id="hold-mode">
+              Solo agregar, no descargar todavía
+            </label>
+            <span class="field-hint">Resuelve el link/carpeta/batch (encuentra los archivos) y lo deja en "En espera" — elegís vos cuándo iniciarlo, desde esa categoría en el sidebar.</span>
           </div>
 
           <div class="field hidden" id="field-upload">
