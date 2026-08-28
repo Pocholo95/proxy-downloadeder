@@ -40,13 +40,42 @@ def _ext_from_url(url):
     return Path(urlsplit(url).path).suffix
 
 
+_KNOWN_MEDIA_EXTS = (
+    ".mp4", ".mkv", ".webm", ".mov", ".avi", ".m4v", ".flv", ".wmv",
+    ".ts", ".3gp", ".mpg", ".mpeg", ".ogv", ".m3u8", ".mpd",
+)
+
+
 def _pick_filename(url, page_title, fallback):
     """Prefer the browser tab's title over the URL's own basename -- most
     HLS manifests are just called index.m3u8 regardless of what video they
     actually are (every stream off the same CDN collides on that name),
-    while the tab title is what actually identifies the video."""
+    while the tab title is what actually identifies the video.
+
+    Plenty of file-hosting/video sites set their <title> to literally
+    "<real filename>.<ext> - SiteName" (or without the dash) -- naively
+    using the whole title and then appending another extension on top of
+    that turned e.g. "Mila-Pie-MigiAoki.mp4 filester.me" into
+    "Mila-Pie-MigiAoki.mp4 filester.me.mp4". Look for an already-known
+    media extension embedded in the title first and cut there instead;
+    only a title with no such extension anywhere falls through to
+    appending one derived from the URL.
+    """
     title = (page_title or "").strip()
     if title:
+        low = title.lower()
+        for ext in _KNOWN_MEDIA_EXTS:
+            idx = low.find(ext)
+            if idx == -1:
+                continue
+            end = idx + len(ext)
+            # Only treat it as a real extension boundary, not a mid-word
+            # coincidence (e.g. ".mp4converter") -- nothing alphanumeric
+            # immediately after it.
+            if end == len(title) or not title[end].isalnum():
+                cut = sanitize_filename(title[:end])
+                if cut and cut != "download.bin":
+                    return cut
         return sanitize_filename(title) + (_ext_from_url(url) or ".mp4")
     return _filename_from_url(url, fallback)
 
