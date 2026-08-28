@@ -528,9 +528,10 @@ _EXTENSION_HEADER_ALLOWLIST = {"referer", "origin", "user-agent", "cookie"}
 
 @app.post("/api/extension/download")
 def api_extension_download():
-    """For extras/violentmonkey/video-catcher.user.js — it watches network
-    traffic in the user's own real browser and, once they pick a detected
-    video, posts it here. No "sniffing" happens server-side at all: this
+    """For the companion browser extension (extras/browser-extension/) —
+    its background script watches real network traffic in the user's own
+    real browser and, once they pick a detected video from its popup,
+    posts it here. No "sniffing" happens server-side at all: this
     goes straight to downloading the one candidate the user already
     picked. No auth (same trust model as the rest of this app —
     Tailscale/LAN only), but headers are still filtered server-side to a

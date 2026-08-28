@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Proxy Downloader - Video Catcher",
+  "version": "1.0.1",
+  "description": "Detecta videos en cualquier pagina viendo el trafico de red real del navegador (no solo lo que la pagina expone en JS) y los manda a tu Proxy Downloader self-hosted para descargarlos server-side.",
+  "permissions": ["webRequest", "webNavigation", "storage", "tabs"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Proxy Downloader - Video Catcher"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "video-catcher-1bf9e59c@proxy-downloader.local",
+      "strict_min_version": "109.0",
+      "data_collection_permissions": {
+        "required": ["browsingActivity", "authenticationInfo"]
+      }
+    }
+  }
+}

@@ -1,11 +1,12 @@
-"""Job manager for videos found by the Violentmonkey userscript
-(extras/violentmonkey/video-catcher.user.js) — that script watches
-network traffic in the user's own real browser and, once they pick which
-detected video they want, POSTs it to POST /api/extension/download. All
-the "detection" already happened client-side by the time this module ever
-sees a job, so there's no candidate-picker phase here at all — every job
-goes straight to downloading the one item the user already chose, with
-the Referer/Origin/User-Agent/Cookie headers their browser actually used,
+"""Job manager for videos found by the companion browser extension
+(extras/browser-extension/) — its background script watches real network
+traffic (webRequest) in the user's own real browser and, once they pick
+which detected video they want from its popup, POSTs it to
+POST /api/extension/download. All the "detection" already happened
+client-side by the time this module ever sees a job, so there's no
+candidate-picker phase here at all — every job goes straight to
+downloading the one item the user already chose, with the
+Referer/Origin/User-Agent/Cookie headers their browser actually used,
 since plenty of CDNs reject a request that doesn't carry them.
 
 Same background-worker-thread shape as jobs.py/upload_jobs.py/

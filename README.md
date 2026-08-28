@@ -155,7 +155,7 @@ que llevar la cuenta a mano). El camino **con** proxy (`download_file`) se
 queda en `requests`, porque aria2 no tiene forma de saltar a otro proxy a
 mitad de una descarga como sí hace la rotación por velocidad de este
 proyecto — por eso "aria2 en todo lo que se pueda, menos donde hay que
-rotar proxy". Mismo motor para el endpoint del userscript de Violentmonkey
+rotar proxy". Mismo motor para el endpoint de la extensión de video
 (nunca usa proxy) y, como downloader externo de yt-dlp, para la pestaña
 "Video (yt-dlp)" cuando el modo de proxy es "Auto" o "Sin proxy" (con
 "Forzar proxy" yt-dlp vuelve a su downloader nativo, ya que aria2 tampoco
@@ -342,44 +342,65 @@ Tiene su propio historial ("Videos (yt-dlp)", persistido en
 Todo video que termine de bajar se optimiza para streaming igual que
 cualquier otra descarga (ver más abajo).
 
-### Video (extensión) — userscript de Violentmonkey/Tampermonkey
+### Video (extensión) — extensión de navegador (Manifest V3)
 
 Para páginas que ni yt-dlp (ni su extractor genérico) resuelve — sitios
 sin extractor específico donde el video real se arma por JS recién al
 reproducir, nunca aparece en el HTML plano. Mismo problema que resuelve
-la extensión **Video DownloadHelper**, pero acá `extras/violentmonkey/
-video-catcher.user.js` corre en **tu propio navegador real** mientras
-mirás el video de forma completamente normal — no hay heurística de click
-en un navegador headless adivinando dónde está el botón de play, porque
-el que hace click sos vos.
+la extensión **Video DownloadHelper**, pero acá `extras/browser-extension/`
+corre en **tu propio navegador real** mientras mirás el video de forma
+completamente normal — no hay heurística de click en un navegador
+headless adivinando dónde está el botón de play, porque el que hace
+click sos vos.
 
-Detecta por dos vías (cualquier `fetch`/XHR que la página dispare, y
-cualquier `<video>` que aparezca en el DOM, incluso adentro de iframes de
-otro origen — Violentmonkey inyecta el script en cada frame por separado,
-así que no hace falta ir a buscar el iframe a mano) y, con un botón
-flotante, manda la URL + `Referer`/`Origin`/`User-Agent` que se usaron de
-verdad a `POST /api/extension/download`, que descarga directo — ya
-elegiste vos, en la página, cuál video era.
+Empezó como un userscript de Violentmonkey (solo veía `fetch`/XHR y el
+`currentSrc` de un `<video>`, ambos expuestos a JS de página), pero eso
+tiene un techo real: un reproductor que arma el video con **MediaSource
+Extensions** (muy común en streaming adaptativo) deja `currentSrc` como
+un `blob:` local — la URL de red real nunca aparece en ningún lado que JS
+de página pueda leer, sin importar qué tan bueno sea el detector. Por
+eso ahora es una extensión de verdad: su `background.js` usa
+`browser.webRequest` para ver el tráfico HTTP real a nivel navegador,
+mismo tipo de acceso que tiene Video DownloadHelper, que sí cubre los
+casos MSE/blob además de todo lo que el userscript ya detectaba.
 
-Instalación: instalá [Violentmonkey](https://violentmonkey.github.io/) (o
-Tampermonkey) en tu navegador, abrí
-`extras/violentmonkey/video-catcher.user.js` desde este repo y confirmá
-la instalación. Trae `@updateURL`/`@downloadURL` apuntando al raw de este
-mismo archivo en GitHub, así que a partir de esa instalación se
-autoactualiza solo cada vez que este archivo cambia acá (Violentmonkey lo
-chequea periódicamente, o "Check for updates" a mano desde su panel) —
-no hace falta reinstalarlo a mano de nuevo después de esta vez. Después,
-desde el menú de Violentmonkey en cualquier
-página, **"⚙️ Configurar servidor"** una sola vez con la URL de tu
-Proxy Downloader (tu hostname de Tailscale o `IP:puerto`). De ahí en más,
-en cualquier página con video aparece un botón flotante abajo a la
-derecha con la cantidad detectada — click, elegís cuál (o "todos"), listo.
+**Firefox únicamente** — usa la API nativa `browser.*` (basada en
+promesas) y `background.scripts` en vez de `service_worker`, que es lo
+que Firefox soporta de forma madura para Manifest V3 (`service_worker`
+ahí sigue siendo experimental). Chrome no tiene el alias `browser.*` que Firefox sí ofrece para
+`chrome.*`, así que tal cual está no carga en Chrome/Edge/Brave —
+portarla implicaría reescribir todo con `chrome.*` + `service_worker`.
 
-No manda cookies (`document.cookie` no ve las `HttpOnly` de todos modos,
-y ningún sitio verificado hasta ahora las necesitó — si alguno las
-pidiera, se pueden sumar a mano en `sendToDownloader()` del script). Sin
-auth en el endpoint, igual que el resto de la app — pero los headers que
-manda el cliente se filtran igual del lado del servidor a la misma
+Un ícono en la barra del navegador con contador (badge) muestra cuántos
+videos encontró en la pestaña activa; click abre un popup con la lista
+— nombre, tipo, tamaño — y un botón "Descargar" por cada uno que manda
+la URL + `Referer`/`Origin`/`User-Agent`/`Cookie` reales (los que el
+navegador efectivamente usó para esa descarga, capturados del tráfico
+real — cookies `HttpOnly` incluidas, algo que el userscript nunca pudo
+ver) a `POST /api/extension/download`, que descarga directo del lado del
+servidor.
+
+Instalación — dos formas:
+- **Firmada, permanente** (recomendado): bajá el `.xpi` firmado por
+  Mozilla desde las [Releases de este
+  repo](https://github.com/Pocholo95/proxy-downloadeder/releases) y
+  arrastralo a Firefox (o `about:addons` → engranaje ⚙️ → "Instalar
+  complemento desde archivo"). Firmado vía `web-ext sign`
+  (self-distribution/unlisted en AMO — no está publicada en el store
+  público).
+- **Sin firmar, temporal** (para probar cambios locales al código):
+  `about:debugging#/runtime/this-firefox` → "Cargar complemento
+  temporal" → elegir cualquier archivo dentro de
+  `extras/browser-extension/` (por ejemplo `manifest.json`). Se pierde
+  al cerrar Firefox, hay que volver a cargarla cada vez.
+
+Después de instalarla, click en su ícono → campo abajo del todo →
+pegás la URL de tu Proxy Downloader (tu hostname de Tailscale o
+`IP:puerto`) → "Guardar", una sola vez. De ahí en más, en cualquier
+página con video el badge del ícono muestra la cantidad detectada.
+
+Sin auth en el endpoint, igual que el resto de la app — pero los headers
+que manda el cliente se filtran igual del lado del servidor a la misma
 lista chica (`Referer`/`Origin`/`User-Agent`/`Cookie`), nunca se reenvía
 lo que sea que venga.
 
