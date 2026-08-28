@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Proxy Downloader - Video Catcher",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Detecta videos en cualquier pagina viendo el trafico de red real del navegador (no solo lo que la pagina expone en JS) y los manda a tu Proxy Downloader self-hosted para descargarlos server-side.",
   "permissions": ["webRequest", "webNavigation", "storage", "tabs"],
   "host_permissions": ["<all_urls>"],
