@@ -30,21 +30,64 @@ MAX_HISTORY = 100
 _HLS_DASH_EXTS = (".m3u8", ".mpd")
 
 
-def _filename_from_url(url, fallback):
-    from urllib.parse import urlsplit, unquote
-    name = unquote(Path(urlsplit(url).path).name)
-    return name or fallback
-
-
-def _ext_from_url(url):
-    from urllib.parse import urlsplit
-    return Path(urlsplit(url).path).suffix
-
-
 _KNOWN_MEDIA_EXTS = (
     ".mp4", ".mkv", ".webm", ".mov", ".avi", ".m4v", ".flv", ".wmv",
     ".ts", ".3gp", ".mpg", ".mpeg", ".ogv", ".m3u8", ".mpd",
 )
+
+
+def _find_known_ext(text):
+    """Scans `text` for one of _KNOWN_MEDIA_EXTS, requiring a real boundary
+    right after it (end-of-string or a non-alphanumeric char) so a mid-word
+    coincidence like ".mp4converter" doesn't misfire. Returns the extension
+    (with leading dot) or "" if none found."""
+    low = text.lower()
+    for ext in _KNOWN_MEDIA_EXTS:
+        idx = low.find(ext)
+        if idx == -1:
+            continue
+        end = idx + len(ext)
+        if end == len(text) or not text[end].isalnum():
+            return ext
+    return ""
+
+
+def _ext_from_url(url):
+    """Real media extension for `url`, or "" if none can be confidently
+    found. Checked against _KNOWN_MEDIA_EXTS rather than blindly trusting
+    whatever suffix the path happens to have -- plenty of sites proxy the
+    real file through a plain endpoint like
+    /remote_control.php?...&file=%2Fvideos%2F...%2Fclip_720p.mp4&..., where
+    naively taking Path(path).suffix returns ".php" (a real suffix, just
+    the wrong one -- the endpoint's own name, not the video's). Falls back
+    to scanning the query string for an embedded one, same idea as
+    _pick_filename does for the page title."""
+    from urllib.parse import urlsplit
+    parts = urlsplit(url)
+    path_ext = Path(parts.path).suffix.lower()
+    if path_ext in _KNOWN_MEDIA_EXTS:
+        return path_ext
+    if parts.query:
+        found = _find_known_ext(parts.query)
+        if found:
+            return found
+    return ""
+
+
+def _filename_from_url(url, fallback):
+    from urllib.parse import urlsplit, unquote
+    name = unquote(Path(urlsplit(url).path).name)
+    if not name:
+        return fallback
+    # Same /remote_control.php-style case as _ext_from_url: the basename
+    # itself isn't a real media filename, but a real extension might still
+    # be findable elsewhere in the URL (its query string) -- tack that on
+    # rather than shipping a file literally named "remote_control.php".
+    if Path(name).suffix.lower() not in _KNOWN_MEDIA_EXTS:
+        ext = _ext_from_url(url)
+        if ext:
+            name = name + ext
+    return name
 
 
 def _pick_filename(url, page_title, fallback):
@@ -64,19 +107,12 @@ def _pick_filename(url, page_title, fallback):
     """
     title = (page_title or "").strip()
     if title:
-        low = title.lower()
-        for ext in _KNOWN_MEDIA_EXTS:
-            idx = low.find(ext)
-            if idx == -1:
-                continue
-            end = idx + len(ext)
-            # Only treat it as a real extension boundary, not a mid-word
-            # coincidence (e.g. ".mp4converter") -- nothing alphanumeric
-            # immediately after it.
-            if end == len(title) or not title[end].isalnum():
-                cut = sanitize_filename(title[:end])
-                if cut and cut != "download.bin":
-                    return cut
+        found = _find_known_ext(title)
+        if found:
+            end = title.lower().find(found) + len(found)
+            cut = sanitize_filename(title[:end])
+            if cut and cut != "download.bin":
+                return cut
         return sanitize_filename(title) + (_ext_from_url(url) or ".mp4")
     return _filename_from_url(url, fallback)
 
