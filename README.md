@@ -364,7 +364,12 @@ elegiste vos, en la página, cuál video era.
 Instalación: instalá [Violentmonkey](https://violentmonkey.github.io/) (o
 Tampermonkey) en tu navegador, abrí
 `extras/violentmonkey/video-catcher.user.js` desde este repo y confirmá
-la instalación. Después, desde el menú de Violentmonkey en cualquier
+la instalación. Trae `@updateURL`/`@downloadURL` apuntando al raw de este
+mismo archivo en GitHub, así que a partir de esa instalación se
+autoactualiza solo cada vez que este archivo cambia acá (Violentmonkey lo
+chequea periódicamente, o "Check for updates" a mano desde su panel) —
+no hace falta reinstalarlo a mano de nuevo después de esta vez. Después,
+desde el menú de Violentmonkey en cualquier
 página, **"⚙️ Configurar servidor"** una sola vez con la URL de tu
 Proxy Downloader (tu hostname de Tailscale o `IP:puerto`). De ahí en más,
 en cualquier página con video aparece un botón flotante abajo a la

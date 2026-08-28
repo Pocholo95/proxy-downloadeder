@@ -11,6 +11,8 @@
 // @grant        GM_notification
 // @connect      *
 // @run-at       document-start
+// @updateURL    https://raw.githubusercontent.com/Pocholo95/proxy-downloadeder/main/extras/violentmonkey/video-catcher.user.js
+// @downloadURL  https://raw.githubusercontent.com/Pocholo95/proxy-downloadeder/main/extras/violentmonkey/video-catcher.user.js
 // ==/UserScript==
 
 /*
