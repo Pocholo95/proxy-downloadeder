@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Proxy Downloader - Video Catcher
 // @namespace    proxy-downloader
-// @version      1.0.0
+// @version      1.1.0
 // @description  Detects video URLs on any page (fetch/XHR calls, <video> elements) and sends the one you pick to your self-hosted Proxy Downloader for a server-side download -- the same idea as Video DownloadHelper, but you play the video yourself in your own real browser instead of a heuristic click in a headless one.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
@@ -118,19 +118,37 @@
   // DASH *segments*, dozens/hundreds per stream, never something to download
   // on its own. The .m3u8/.mpd manifest is the one thing worth surfacing;
   // ffmpeg reads it and fetches every segment itself when it downloads.
-  const VIDEO_EXT_RE = /\.(mp4|webm|mkv|mov|m3u8|mpd|avi|flv|m4v)(\?|$)/i;
+  //
+  // Matched against the FULL url (not just the pathname) with the boundary
+  // widened to "?", "&" or end-of-string -- plenty of sites (adult tube
+  // sites especially) proxy the real file through a plain endpoint like
+  // /remote_control.php?...&file=%2Fvideos%2F...%2Fclip_720p.mp4&... where
+  // the real filename only ever shows up inside a query parameter, never
+  // in the path itself. Pathname-only matching missed every one of those.
+  const VIDEO_EXT_RE = /\.(mp4|webm|mkv|mov|m3u8|mpd|avi|flv|m4v)(?=[?&]|$)/i;
+  // Independent fallback signal for the same case when even that misses --
+  // a real HTTP response content-type is a much stronger signal than any
+  // URL guess, when it's actually available (fetch()/XHR only; a native
+  // <video> element's own resource load never exposes response headers to
+  // page JS at all, so this can't help that path, only the interception one).
+  const VIDEO_CONTENT_TYPE_RE = /^(video\/|application\/(vnd\.apple\.mpegurl|dash\+xml|x-mpegurl))/i;
   const candidates = new Map(); // url -> {url, contentType, size}
 
   function looksLikeVideoUrl(url) {
     try {
-      return VIDEO_EXT_RE.test(new URL(url, location.href).pathname);
+      return VIDEO_EXT_RE.test(new URL(url, location.href).href);
     } catch {
       return false;
     }
   }
 
+  function looksLikeVideoType(contentType) {
+    return !!contentType && VIDEO_CONTENT_TYPE_RE.test(contentType.trim());
+  }
+
   function addCandidate(url, contentType, size) {
-    if (!url || candidates.has(url) || !looksLikeVideoUrl(url)) return;
+    if (!url || candidates.has(url)) return;
+    if (!looksLikeVideoUrl(url) && !looksLikeVideoType(contentType)) return;
     candidates.set(url, { url, contentType: contentType || "", size: size ? Number(size) : null });
     updateButton();
   }
