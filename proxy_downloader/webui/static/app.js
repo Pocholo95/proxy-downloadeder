@@ -86,6 +86,15 @@ const els = {
   filesBulkUpload: document.getElementById("files-bulk-upload"),
   filesBulkDownload: document.getElementById("files-bulk-download"),
   filesBulkDelete: document.getElementById("files-bulk-delete"),
+  filesNewFolderBtn: document.getElementById("files-new-folder"),
+  filesBulkMove: document.getElementById("files-bulk-move"),
+  filesBulkRename: document.getElementById("files-bulk-rename"),
+  // generic file-manager modal (move / advanced rename)
+  fmModalBackdrop: document.getElementById("fm-modal-backdrop"),
+  fmModalTitle: document.getElementById("fm-modal-title"),
+  fmModalBody: document.getElementById("fm-modal-body"),
+  fmModalFoot: document.getElementById("fm-modal-foot"),
+  fmModalClose: document.getElementById("fm-modal-close"),
   // preview modal
   previewModal: document.getElementById("preview-modal"),
   previewContent: document.getElementById("preview-content"),
@@ -250,6 +259,7 @@ const DOWNLOAD_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor
 const RENAME_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
 const OPTIMIZE_ICON = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg>';
 const TRASH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>';
+const MOVE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/><path d="M9 15l3-3-3-3"/><path d="M12 12H6"/></svg>';
 
 // ═══════════════════════════════════════════════════════════════════════
 // Add-task modal — tabs mirror the 4 old always-visible sidebar tabs, just
@@ -1171,6 +1181,7 @@ function fileRow(entry) {
     icons.push(`<button type="button" class="ricon" data-upload-existing="${escapeAttr(path)}" data-upload-name="${escapeAttr(entry.name)}" title="Subir">${ICONS.upload}</button>`);
   }
   icons.push(`<button type="button" class="ricon" data-download="${escapeAttr(path)}" title="Descargar${entry.is_dir ? " (.zip)" : ""}">${DOWNLOAD_ICON}</button>`);
+  if (!entry.partial) icons.push(`<button type="button" class="ricon" data-move="${escapeAttr(path)}" data-name="${escapeAttr(entry.name)}" title="Mover">${MOVE_ICON}</button>`);
   if (!entry.partial) icons.push(`<button type="button" class="ricon" data-rename="${escapeAttr(path)}" data-name="${escapeAttr(entry.name)}" title="Renombrar">${RENAME_ICON}</button>`);
   icons.push(`<button type="button" class="ricon" data-delete="${escapeAttr(path)}" data-name="${escapeAttr(entry.name)}" title="Borrar">${TRASH_ICON}</button>`);
 
@@ -1274,6 +1285,11 @@ async function loadFiles(path) {
         window.location.href = `/api/files/download?path=${encodeURIComponent(btn.dataset.download)}`;
       });
     });
+    els.filesList.querySelectorAll("button[data-move]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        openMoveModal([{ path: btn.dataset.move, name: btn.dataset.name }]);
+      });
+    });
     els.filesList.querySelectorAll("button[data-rename]").forEach((btn) => {
       btn.addEventListener("click", async () => {
         const current = btn.dataset.name;
@@ -1355,6 +1371,238 @@ els.filesBulkDelete.addEventListener("click", async () => {
   state.filesSelected.clear();
   loadFiles(state.filesPath);
 });
+
+els.filesNewFolderBtn.addEventListener("click", async () => {
+  const name = prompt("Nombre de la carpeta nueva:");
+  if (name === null || name.trim() === "") return;
+  try {
+    await fetchJSON("/api/files/mkdir", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: state.filesPath, name }),
+    });
+    loadFiles(state.filesPath);
+  } catch (err) {
+    alert(`No se pudo crear la carpeta: ${err.message}`);
+  }
+});
+
+els.filesBulkMove.addEventListener("click", () => {
+  const paths = [...state.filesSelected];
+  if (!paths.length) return;
+  openMoveModal(paths.map((p) => ({ path: p, name: p.split("/").pop() })));
+});
+
+els.filesBulkRename.addEventListener("click", () => {
+  const paths = [...state.filesSelected];
+  if (!paths.length) return;
+  openRenameModal(paths.map((p) => ({ path: p, name: p.split("/").pop() })));
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// Generic file-manager modal — reused for the "Mover" folder picker and
+// the "Renombrar" (advanced batch rename) tool. Both build their own
+// content into fm-modal-body/-foot on open and tear it down on close, the
+// same dynamic-innerHTML approach openPreview() below uses for its modal.
+// ═══════════════════════════════════════════════════════════════════════
+
+function openFmModal(title) {
+  els.fmModalTitle.textContent = title;
+  els.fmModalBackdrop.classList.add("show");
+}
+function closeFmModal() {
+  els.fmModalBackdrop.classList.remove("show");
+  els.fmModalBody.innerHTML = "";
+  els.fmModalFoot.innerHTML = "";
+}
+els.fmModalClose.addEventListener("click", closeFmModal);
+els.fmModalBackdrop.addEventListener("click", (e) => { if (e.target === els.fmModalBackdrop) closeFmModal(); });
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && els.fmModalBackdrop.classList.contains("show")) closeFmModal();
+});
+
+// items: [{path, name}, ...] to relocate. Browses folders starting from
+// wherever Archivos currently is, independent of the underlying view's
+// own navigation state.
+function openMoveModal(items) {
+  let navPath = state.filesPath;
+  openFmModal(items.length === 1 ? `Mover "${items[0].name}"` : `Mover ${items.length} elementos`);
+
+  async function render() {
+    try {
+      const data = await fetchJSON(`/api/files?path=${encodeURIComponent(navPath)}`);
+      navPath = data.path;
+      const dirs = data.entries.filter((e) => e.is_dir);
+
+      const parts = navPath ? navPath.split("/") : [];
+      let acc = "";
+      const crumbs = [`<button type="button" data-nav="">downloads</button>`];
+      for (const part of parts) {
+        acc = joinPath(acc, part);
+        crumbs.push(`<span class="sep">/</span><button type="button" data-nav="${escapeAttr(acc)}">${part}</button>`);
+      }
+      const rows = dirs.length
+        ? dirs.map((d) => `<button type="button" class="link-btn" data-nav="${escapeAttr(joinPath(navPath, d.name))}">📁 ${d.name}</button>`).join("")
+        : `<p class="dim">Sin subcarpetas.</p>`;
+
+      els.fmModalBody.innerHTML = `
+        <div class="breadcrumb">${crumbs.join("")}</div>
+        <div class="move-dir-list">${rows}</div>
+      `;
+      els.fmModalBody.querySelectorAll("[data-nav]").forEach((btn) => {
+        btn.addEventListener("click", () => { navPath = btn.dataset.nav; render(); });
+      });
+
+      els.fmModalFoot.innerHTML = `
+        <span class="error-msg" id="fm-move-error"></span>
+        <div class="tb-spacer"></div>
+        <button type="button" class="tbtn ghost big" id="fm-move-cancel">Cancelar</button>
+        <button type="button" class="tbtn primary big" id="fm-move-confirm">Mover aquí</button>
+      `;
+      document.getElementById("fm-move-cancel").addEventListener("click", closeFmModal);
+      document.getElementById("fm-move-confirm").addEventListener("click", async () => {
+        const confirmBtn = document.getElementById("fm-move-confirm");
+        const errEl = document.getElementById("fm-move-error");
+        confirmBtn.disabled = true;
+        const errors = [];
+        for (const item of items) {
+          try {
+            await fetchJSON("/api/files/move", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ path: item.path, dest: navPath }),
+            });
+          } catch (err) {
+            errors.push(`${item.name}: ${err.message}`);
+          }
+        }
+        if (errors.length) {
+          errEl.textContent = errors.join(" · ");
+          confirmBtn.disabled = false;
+          loadFiles(state.filesPath);
+          return;
+        }
+        state.filesSelected.clear();
+        closeFmModal();
+        loadFiles(state.filesPath);
+      });
+    } catch (err) {
+      els.fmModalBody.innerHTML = `<p class="error-msg">${err.message}</p>`;
+    }
+  }
+  render();
+}
+
+// items: [{path, name}, ...] to rename. Find/replace runs on the name
+// without its extension; prefix/suffix/counter wrap around that result,
+// the extension is always re-appended untouched last.
+function openRenameModal(items) {
+  openFmModal(items.length === 1 ? `Renombrar "${items[0].name}"` : `Renombrar ${items.length} archivos`);
+
+  function readOpts() {
+    return {
+      find: document.getElementById("rn-find").value,
+      replace: document.getElementById("rn-replace").value,
+      prefix: document.getElementById("rn-prefix").value,
+      suffix: document.getElementById("rn-suffix").value,
+      counter: document.getElementById("rn-counter-enable").checked,
+      counterPos: document.getElementById("rn-counter-pos").value,
+      counterStart: parseInt(document.getElementById("rn-counter-start").value, 10) || 1,
+      counterDigits: Math.max(1, parseInt(document.getElementById("rn-counter-digits").value, 10) || 1),
+      counterSep: document.getElementById("rn-counter-sep").value,
+    };
+  }
+
+  function computeName(name, index, opts) {
+    const dot = name.lastIndexOf(".");
+    const hasExt = dot > 0; // dot===0 is a dotfile with no real extension
+    let base = hasExt ? name.slice(0, dot) : name;
+    const ext = hasExt ? name.slice(dot) : "";
+    if (opts.find) base = base.split(opts.find).join(opts.replace);
+    let counter = "";
+    if (opts.counter) {
+      counter = opts.counterSep + String(opts.counterStart + index).padStart(opts.counterDigits, "0");
+    }
+    let result = opts.prefix + (opts.counter && opts.counterPos === "start" ? counter : "") + base;
+    result += opts.suffix + (opts.counter && opts.counterPos === "end" ? counter : "");
+    return result + ext;
+  }
+
+  function renderPreview() {
+    const opts = readOpts();
+    document.getElementById("rn-counter-fields").classList.toggle("hidden", !opts.counter);
+    document.getElementById("rn-preview-body").innerHTML = items
+      .map((item, i) => `<tr><td class="dim">${escapeAttr(item.name)}</td><td>${escapeAttr(computeName(item.name, i, opts))}</td></tr>`)
+      .join("");
+  }
+
+  els.fmModalBody.innerHTML = `
+    <div class="field-row">
+      <div class="field"><label for="rn-find">Buscar</label><input type="text" id="rn-find" placeholder="texto a buscar"></div>
+      <div class="field"><label for="rn-replace">Reemplazar por</label><input type="text" id="rn-replace" placeholder="texto nuevo"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label for="rn-prefix">Prefijo</label><input type="text" id="rn-prefix"></div>
+      <div class="field"><label for="rn-suffix">Sufijo</label><input type="text" id="rn-suffix"></div>
+    </div>
+    <div class="field-check">
+      <label class="check-label"><input type="checkbox" id="rn-counter-enable">Agregar contador</label>
+    </div>
+    <div class="field-row hidden" id="rn-counter-fields">
+      <div class="field"><label for="rn-counter-pos">Posición</label>
+        <select id="rn-counter-pos"><option value="end">Al final</option><option value="start">Al inicio</option></select>
+      </div>
+      <div class="field"><label for="rn-counter-start">Empezar en</label><input type="number" id="rn-counter-start" value="1"></div>
+      <div class="field"><label for="rn-counter-digits">Dígitos</label><input type="number" id="rn-counter-digits" value="2" min="1"></div>
+      <div class="field"><label for="rn-counter-sep">Separador</label><input type="text" id="rn-counter-sep" value="_"></div>
+    </div>
+    <label class="field-hint" style="display:block;margin:10px 0 6px;">Vista previa</label>
+    <table class="data-table"><thead><tr><th>Actual</th><th>Nuevo</th></tr></thead><tbody id="rn-preview-body"></tbody></table>
+  `;
+  els.fmModalBody.querySelectorAll("input, select").forEach((el) => {
+    el.addEventListener("input", renderPreview);
+    el.addEventListener("change", renderPreview);
+  });
+  renderPreview();
+
+  els.fmModalFoot.innerHTML = `
+    <span class="error-msg" id="rn-error"></span>
+    <div class="tb-spacer"></div>
+    <button type="button" class="tbtn ghost big" id="rn-cancel">Cancelar</button>
+    <button type="button" class="tbtn primary big" id="rn-confirm">Renombrar</button>
+  `;
+  document.getElementById("rn-cancel").addEventListener("click", closeFmModal);
+  document.getElementById("rn-confirm").addEventListener("click", async () => {
+    const opts = readOpts();
+    const confirmBtn = document.getElementById("rn-confirm");
+    const errEl = document.getElementById("rn-error");
+    confirmBtn.disabled = true;
+    const errors = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const newName = computeName(item.name, i, opts);
+      if (newName === item.name) continue;
+      try {
+        await fetchJSON("/api/files/rename", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: item.path, new_name: newName }),
+        });
+      } catch (err) {
+        errors.push(`${item.name}: ${err.message}`);
+      }
+    }
+    if (errors.length) {
+      errEl.textContent = errors.join(" · ");
+      confirmBtn.disabled = false;
+      loadFiles(state.filesPath);
+      return;
+    }
+    state.filesSelected.clear();
+    closeFmModal();
+    loadFiles(state.filesPath);
+  });
+}
 
 function openPreview(path, kind) {
   const url = `/api/files/preview?path=${encodeURIComponent(path)}`;

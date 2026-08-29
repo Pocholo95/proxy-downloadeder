@@ -73,10 +73,15 @@
       </div>
 
       <div class="view-panel" id="files-view" style="display:none;">
-        <div id="files-breadcrumb" class="breadcrumb"></div>
+        <div class="files-toolbar">
+          <div id="files-breadcrumb" class="breadcrumb"></div>
+          <button type="button" class="tbtn ghost" id="files-new-folder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7z"/><path d="M12 12v4M10 14h4"/></svg>Nueva carpeta</button>
+        </div>
         <div class="bulk-bar" id="files-bulk-bar">
           <span><span class="count" id="files-bulk-count">0</span> seleccionados</span>
           <div class="tb-spacer"></div>
+          <button type="button" class="tbtn ghost" id="files-bulk-move"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/><path d="M9 15l3-3-3-3"/><path d="M12 12H6"/></svg>Mover</button>
+          <button type="button" class="tbtn ghost" id="files-bulk-rename"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>Renombrar</button>
           <button type="button" class="tbtn ghost" id="files-bulk-upload"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 21V8M6 13l6-6 6 6"/><path d="M4 21h16"/></svg>Subir</button>
           <button type="button" class="tbtn ghost" id="files-bulk-download"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 21h16"/></svg>Descargar</button>
           <button type="button" class="tbtn ghost" id="files-bulk-delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>Borrar</button>
@@ -239,6 +244,19 @@ https://1fichier.com/?XXXXXXXXX"></textarea>
           <button type="submit" class="tbtn primary big" id="submit-btn">Descargar</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="fm-modal-backdrop">
+    <div class="modal">
+      <div class="modal-head">
+        <h3 id="fm-modal-title"></h3>
+        <button type="button" class="modal-close" id="fm-modal-close" aria-label="Cerrar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body" id="fm-modal-body"></div>
+      <div class="modal-foot" id="fm-modal-foot"></div>
     </div>
   </div>
 

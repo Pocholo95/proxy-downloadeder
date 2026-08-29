@@ -304,6 +304,21 @@ video/audio/imagen hay **preview in-browser** — click en el nombre abre un
 reproductor con seek (soporta Range) sin descargar nada, `Esc` o click
 afuera para cerrar.
 
+También tiene **"📁 Nueva carpeta"** (arriba a la derecha, junto al
+breadcrumb; crea una subcarpeta en la carpeta actual), **mover** (icono en
+cada fila, o botón "Mover" en la barra de selección múltiple; abre un
+modal con su propio explorador de carpetas — navegás y tocás "Mover
+aquí" — con las mismas protecciones que el rename: no deja mover la
+carpeta raíz de descargas, ni una carpeta dentro de sí misma o de un
+descendiente suyo, ni una descarga `.part` en curso) y un **renombrado
+avanzado por lote** (botón "Renombrar" en la barra de selección múltiple,
+solo para archivos sueltos — las carpetas no entran en la selección
+múltiple): buscar y reemplazar texto, prefijo, sufijo y un contador
+numérico opcional (posición inicio/fin, número inicial, cantidad de
+dígitos, separador), todo con vista previa en vivo del nombre resultante
+de cada archivo antes de aplicar. La extensión nunca se toca — el
+buscar/reemplazar corre solo sobre el nombre sin ella.
+
 Cada `.mp4`/`.m4v`/`.mov` tiene un botón **"🚀 Optimizar"**: hace
 `ffmpeg -c copy -movflags +faststart`, un *remux* (no transcodifica —
 copia los streams tal cual) que mueve el índice del archivo al principio

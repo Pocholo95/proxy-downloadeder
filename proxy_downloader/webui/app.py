@@ -218,6 +218,44 @@ def api_rename_file():
     return jsonify({"ok": True, "path": new_rel, "name": clean_name})
 
 
+@app.post("/api/files/mkdir")
+def api_mkdir_file():
+    data = request.get_json(silent=True) or {}
+    rel = data.get("path", "")
+    name = data.get("name", "")
+    try:
+        new_rel, clean_name = files_api.mkdir_path(OUTPUT_DIR, rel, name)
+    except files_api.UnsafePath as e:
+        return jsonify({"error": str(e)}), 400
+    except NotADirectoryError:
+        return jsonify({"error": "not found"}), 404
+    except FileExistsError as e:
+        return jsonify({"error": str(e)}), 409
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"ok": True, "path": new_rel, "name": clean_name})
+
+
+@app.post("/api/files/move")
+def api_move_file():
+    data = request.get_json(silent=True) or {}
+    rel = data.get("path", "")
+    dest = data.get("dest", "")
+    try:
+        new_rel, name = files_api.move_path(OUTPUT_DIR, rel, dest)
+    except files_api.UnsafePath as e:
+        return jsonify({"error": str(e)}), 400
+    except FileNotFoundError:
+        return jsonify({"error": "not found"}), 404
+    except NotADirectoryError:
+        return jsonify({"error": "destino inválido"}), 400
+    except FileExistsError as e:
+        return jsonify({"error": str(e)}), 409
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"ok": True, "path": new_rel, "name": name})
+
+
 @app.get("/api/files/download")
 def api_download_file():
     rel = request.args.get("path", "")

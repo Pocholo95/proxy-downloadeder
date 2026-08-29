@@ -6,6 +6,7 @@ filesystem operation — that's what stops `../../etc/passwd`-style requests
 from ever touching anything outside the mounted downloads volume.
 """
 import os
+import shutil
 import tempfile
 import zipfile
 from pathlib import Path
@@ -84,10 +85,59 @@ def delete_path(root, rel):
     if not target.exists():
         raise FileNotFoundError(str(target))
     if target.is_dir():
-        import shutil
         shutil.rmtree(target)
     else:
         target.unlink()
+
+
+def mkdir_path(root, rel, name):
+    """Create a new subdirectory named `name` under `rel`. Returns
+    (new_rel_path, clean_name)."""
+    parent = safe_path(root, rel)
+    root = Path(root).resolve()
+    if not parent.is_dir():
+        raise NotADirectoryError(str(parent))
+
+    raw = (name or "").strip()
+    if not raw:
+        raise ValueError("Falta el nombre de la carpeta")
+    clean_name = sanitize_filename(raw)
+    if clean_name == "download.bin" and raw != "download.bin":
+        raise ValueError("El nombre no tiene caracteres válidos")
+    if clean_name in (".", ".."):
+        raise ValueError("Nombre inválido")
+
+    target = parent / clean_name
+    if target.exists():
+        raise FileExistsError(f'Ya existe algo llamado "{clean_name}" ahí')
+    target.mkdir()
+    return str(target.relative_to(root)), clean_name
+
+
+def move_path(root, rel, dest_rel):
+    """Move the file/folder at `rel` into the directory at `dest_rel`,
+    keeping its current name. Returns (new_rel_path, name)."""
+    target = safe_path(root, rel)
+    dest_dir = safe_path(root, dest_rel)
+    root = Path(root).resolve()
+    if target == root:
+        raise UnsafePath("Refusing to move the download directory itself")
+    if not target.exists():
+        raise FileNotFoundError(str(target))
+    if not dest_dir.is_dir():
+        raise NotADirectoryError(str(dest_dir))
+    if target.suffix == ".part":
+        raise ValueError("No se puede mover una descarga en curso")
+    if target.is_dir() and (dest_dir == target or target in dest_dir.parents):
+        raise ValueError("No se puede mover una carpeta dentro de sí misma")
+
+    new_target = dest_dir / target.name
+    if new_target == target:
+        return str(target.relative_to(root)), target.name  # already there
+    if new_target.exists():
+        raise FileExistsError(f'Ya existe algo llamado "{target.name}" ahí')
+    shutil.move(str(target), str(new_target))
+    return str(new_target.relative_to(root)), target.name
 
 
 def rename_path(root, rel, new_name):
