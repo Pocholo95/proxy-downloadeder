@@ -366,36 +366,57 @@ def api_create_upload_job():
 
 @app.post("/api/uploads/folder-jobs")
 def api_create_upload_folder_jobs():
-    """Uploads every file directly inside an already-downloaded folder to
-    one or more sites, all landing in a single destination folder per site
-    instead of the N independent one-file uploads the per-file endpoint
-    above would produce. For a site with an account configured, that's
-    an existing/newly-created folder the same way the single-file flow
-    already supports; for a site whose account is optional (only Gofile)
-    and none is configured, a throwaway anonymous folder is created for
-    the whole batch (see UploadManager.create_guest_folder) -- a temp
-    folder on the host with no login involved, same idea as a downloaded
-    folder staying grouped locally."""
+    """Uploads several local files to one or more sites at once, all
+    landing in a single destination folder per site instead of the N
+    independent one-file uploads the per-file endpoint above would
+    produce. For a site with an account configured, that's an existing/
+    newly-created folder the same way the single-file flow already
+    supports; for a site whose account is optional (only Gofile) and none
+    is configured, a throwaway anonymous folder is created for the whole
+    batch (see UploadManager.create_guest_folder) -- a temp folder on the
+    host with no login involved, same idea as a downloaded folder staying
+    grouped locally.
+
+    Two ways to pick the files, same result either way: `path` (every
+    file directly inside a downloaded folder) or `paths` (an explicit
+    hand-picked list, e.g. a multi-select in the Archivos view -- not
+    necessarily everything in one folder, or even all from the same one)."""
     data = request.get_json(silent=True) or {}
     sites_payload = data.get("sites") or []
     if not sites_payload:
         return jsonify({"error": "Marcá al menos un sitio destino"}), 400
-    try:
-        folder_path = files_api.safe_path(OUTPUT_DIR, data.get("path", ""))
-    except files_api.UnsafePath:
-        return jsonify({"error": "invalid path"}), 400
-    if not folder_path.is_dir():
-        return jsonify({"error": "not found"}), 404
 
-    local_files = sorted(p for p in folder_path.iterdir() if p.is_file() and p.suffix != ".part")
-    if not local_files:
-        return jsonify({"error": "La carpeta está vacía"}), 400
+    explicit_paths = data.get("paths")
+    if explicit_paths:
+        try:
+            local_files = []
+            for rel in explicit_paths:
+                p = files_api.safe_path(OUTPUT_DIR, rel)
+                if p.is_file() and p.suffix != ".part":
+                    local_files.append(p)
+        except files_api.UnsafePath:
+            return jsonify({"error": "invalid path"}), 400
+        if not local_files:
+            return jsonify({"error": "Ningún archivo válido en la selección"}), 400
+        default_name = f"{len(local_files)} archivos"
+    else:
+        try:
+            folder_path = files_api.safe_path(OUTPUT_DIR, data.get("path", ""))
+        except files_api.UnsafePath:
+            return jsonify({"error": "invalid path"}), 400
+        if not folder_path.is_dir():
+            return jsonify({"error": "not found"}), 404
+        local_files = sorted(p for p in folder_path.iterdir() if p.is_file() and p.suffix != ".part")
+        if not local_files:
+            return jsonify({"error": "La carpeta está vacía"}), 400
+        default_name = folder_path.name
 
-    # Defaults to the local folder's own name, but the UI lets the user
-    # override it -- this is only what gets used for a *newly created*
-    # destination folder (guest or real-account); a site where an existing
-    # folder was picked instead (choice["folder_id"] below) ignores it.
-    new_folder_name = (data.get("folder_name") or "").strip() or folder_path.name
+    # Defaults to the local folder's own name (or "N archivos" for an
+    # explicit selection), but the UI lets the user override it -- this is
+    # only what gets used for a *newly created* destination folder (guest
+    # or real-account); a site where an existing folder was picked instead
+    # (choice["folder_id"] below) ignores it.
+    new_folder_name = (data.get("folder_name") or "").strip() or default_name
 
     configured = {s["site"]: s["configured"] for s in upload_manager.list_upload_sites()}
     # Every job from this one request shares this batch id/label -- the N

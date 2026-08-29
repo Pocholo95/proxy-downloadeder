@@ -10,12 +10,14 @@ const state = {
   expanded: new Set(),                // task uids currently showing their child rows
   openLogs: new Set(),                // uid ("jobs:<id>" | "video:<id>" | "extension:<id>")
   filesPath: "",
+  filesSelected: new Set(),           // selected file paths in the current Archivos listing
   uploadSites: [],                    // from /api/uploads/sites
   uploadSelectedSites: new Set(),     // site names checked for the next upload
   uploadFoldersBySite: {},            // site -> [{id, name}, ...]
   uploadFolderChoiceBySite: {},       // site -> chosen folder id
   uploadSelectedExisting: null,       // {path, name} of an already-downloaded file picked for upload
   uploadSelectedFolder: null,         // {path, name} of an already-downloaded folder picked for a batch upload
+  uploadSelectedFiles: null,          // [{path, name}, ...] hand-picked from Archivos (not a whole folder) for a batch upload
 };
 
 const els = {
@@ -79,6 +81,11 @@ const els = {
   // files view
   filesList: document.getElementById("files-list"),
   filesBreadcrumb: document.getElementById("files-breadcrumb"),
+  filesBulkBar: document.getElementById("files-bulk-bar"),
+  filesBulkCount: document.getElementById("files-bulk-count"),
+  filesBulkUpload: document.getElementById("files-bulk-upload"),
+  filesBulkDownload: document.getElementById("files-bulk-download"),
+  filesBulkDelete: document.getElementById("files-bulk-delete"),
   // preview modal
   previewModal: document.getElementById("preview-modal"),
   previewContent: document.getElementById("preview-content"),
@@ -239,6 +246,10 @@ const ICONS = {
 const CHEVRON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M9 6l6 6-6 6"/></svg>';
 const PLAY_ICON = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
 const HOLD_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>';
+const DOWNLOAD_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 21h16"/></svg>';
+const RENAME_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
+const OPTIMIZE_ICON = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg>';
+const TRASH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>';
 
 // ═══════════════════════════════════════════════════════════════════════
 // Add-task modal — tabs mirror the 4 old always-visible sidebar tabs, just
@@ -1144,31 +1155,79 @@ function fileRow(entry) {
   } else {
     nameCell = `${icon} ${entry.name}`;
   }
+
+  // Only plain files are selectable for the "pick a few, upload together"
+  // batch flow -- a folder already has its own dedicated whole-folder
+  // upload action, and mixing the two into one batch would mean silently
+  // expanding a folder selection into "every file in it", not what a
+  // checkbox next to one specific row should imply.
+  const chk = entry.is_dir ? "" : `<input type="checkbox" data-fchk="${escapeAttr(path)}" ${state.filesSelected.has(path) ? "checked" : ""}>`;
+
+  const icons = [];
+  if (entry.optimizable) icons.push(`<button type="button" class="ricon" data-optimize="${escapeAttr(path)}" title="Optimizar para streaming">${OPTIMIZE_ICON}</button>`);
+  if (entry.is_dir) {
+    icons.push(`<button type="button" class="ricon" data-upload-folder="${escapeAttr(path)}" data-upload-name="${escapeAttr(entry.name)}" title="Subir carpeta">${ICONS.upload}</button>`);
+  } else {
+    icons.push(`<button type="button" class="ricon" data-upload-existing="${escapeAttr(path)}" data-upload-name="${escapeAttr(entry.name)}" title="Subir">${ICONS.upload}</button>`);
+  }
+  icons.push(`<button type="button" class="ricon" data-download="${escapeAttr(path)}" title="Descargar${entry.is_dir ? " (.zip)" : ""}">${DOWNLOAD_ICON}</button>`);
+  if (!entry.partial) icons.push(`<button type="button" class="ricon" data-rename="${escapeAttr(path)}" data-name="${escapeAttr(entry.name)}" title="Renombrar">${RENAME_ICON}</button>`);
+  icons.push(`<button type="button" class="ricon" data-delete="${escapeAttr(path)}" data-name="${escapeAttr(entry.name)}" title="Borrar">${TRASH_ICON}</button>`);
+
   return `<tr>
+    <td class="chk-col">${chk}</td>
     <td>${nameCell}</td>
     <td class="dim">${sizeLabel}${entry.partial ? " (incompleto)" : ""}</td>
     <td class="dim">${fmtDate(entry.mtime)}</td>
-    <td class="actions">
-      ${entry.optimizable ? `<button type="button" class="tbtn ghost" data-optimize="${escapeAttr(path)}">🚀 Optimizar</button>` : ""}
-      ${entry.is_dir ? `<button type="button" class="tbtn ghost" data-upload-folder="${escapeAttr(path)}" data-upload-name="${escapeAttr(entry.name)}">⬆ Subir carpeta</button>` : `<button type="button" class="tbtn ghost" data-upload-existing="${escapeAttr(path)}" data-upload-name="${escapeAttr(entry.name)}">⬆ Subir</button>`}
-      <button type="button" class="tbtn ghost" data-download="${escapeAttr(path)}">Descargar${entry.is_dir ? " (.zip)" : ""}</button>
-      ${entry.partial ? "" : `<button type="button" class="tbtn ghost" data-rename="${escapeAttr(path)}" data-name="${escapeAttr(entry.name)}">✏ Renombrar</button>`}
-      <button type="button" class="tbtn ghost" data-delete="${escapeAttr(path)}" data-name="${escapeAttr(entry.name)}">Borrar</button>
-    </td>
+    <td class="actions"><div class="row-actions">${icons.join("")}</div></td>
   </tr>`;
+}
+
+function updateFilesBulkBar() {
+  const n = state.filesSelected.size;
+  els.filesBulkBar.classList.toggle("show", n > 0);
+  els.filesBulkCount.textContent = n;
 }
 
 async function loadFiles(path) {
   try {
+    const navigated = path !== state.filesPath;
     const data = await fetchJSON(`/api/files?path=${encodeURIComponent(path || "")}`);
+    // A same-path refresh (after renaming/deleting/optimizing one row via
+    // its own icon) keeps whatever multi-selection was already in
+    // progress; only an actual navigation elsewhere resets it -- carrying
+    // a selection across an unrelated folder makes no sense to keep.
+    if (navigated) state.filesSelected.clear();
     state.filesPath = data.path;
     renderBreadcrumb();
     els.filesList.innerHTML = data.entries.length
       ? `<table class="data-table">
-          <thead><tr><th>Nombre</th><th>Tamaño</th><th>Modificado</th><th></th></tr></thead>
+          <thead><tr><th class="chk-col"><input type="checkbox" id="files-chk-all"></th><th>Nombre</th><th>Tamaño</th><th>Modificado</th><th></th></tr></thead>
           <tbody>${data.entries.map(fileRow).join("")}</tbody>
         </table>`
       : `<p class="dim">Vacío.</p>`;
+    updateFilesBulkBar();
+
+    const selectableEntries = data.entries.filter((e) => !e.is_dir);
+    const chkAll = document.getElementById("files-chk-all");
+    if (chkAll) {
+      chkAll.checked = selectableEntries.length > 0 && selectableEntries.every((e) => state.filesSelected.has(joinPath(state.filesPath, e.name)));
+      chkAll.addEventListener("change", () => {
+        for (const e of selectableEntries) {
+          const p = joinPath(state.filesPath, e.name);
+          if (chkAll.checked) state.filesSelected.add(p); else state.filesSelected.delete(p);
+        }
+        els.filesList.querySelectorAll("input[data-fchk]").forEach((cb) => { cb.checked = chkAll.checked; });
+        updateFilesBulkBar();
+      });
+    }
+    els.filesList.querySelectorAll("input[data-fchk]").forEach((cb) => {
+      cb.addEventListener("change", () => {
+        const p = cb.dataset.fchk;
+        if (cb.checked) state.filesSelected.add(p); else state.filesSelected.delete(p);
+        updateFilesBulkBar();
+      });
+    });
 
     els.filesList.querySelectorAll("button[data-open]").forEach((btn) => {
       btn.addEventListener("click", () => loadFiles(btn.dataset.open));
@@ -1179,7 +1238,7 @@ async function loadFiles(path) {
     els.filesList.querySelectorAll("button[data-optimize]").forEach((btn) => {
       btn.addEventListener("click", async () => {
         btn.disabled = true;
-        btn.textContent = "Optimizando…";
+        btn.title = "Optimizando…";
         try {
           await fetchJSON("/api/files/optimize", {
             method: "POST",
@@ -1252,6 +1311,51 @@ async function loadFiles(path) {
   }
 }
 
+els.filesBulkUpload.addEventListener("click", () => {
+  const paths = [...state.filesSelected];
+  if (!paths.length) return;
+  state.uploadSelectedExisting = null;
+  state.uploadSelectedFolder = null;
+  state.uploadSelectedFiles = paths.map((p) => ({ path: p, name: p.split("/").pop() }));
+  els.uploadFileInput.value = "";
+  renderUploadSelectedExisting();
+  switchToUploadTab();
+});
+
+els.filesBulkDownload.addEventListener("click", () => {
+  // Multiple simultaneous window.location.href navigations would only
+  // keep the last one -- a throwaway <a download> click per file avoids
+  // that without navigating the page at all, same trick the browser's
+  // own multi-file download UI uses.
+  for (const p of state.filesSelected) {
+    const a = document.createElement("a");
+    a.href = `/api/files/download?path=${encodeURIComponent(p)}`;
+    a.download = "";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+});
+
+els.filesBulkDelete.addEventListener("click", async () => {
+  const paths = [...state.filesSelected];
+  if (!paths.length) return;
+  if (!confirm(`¿Borrar ${paths.length} archivo(s)? Esta acción no se puede deshacer.`)) return;
+  for (const p of paths) {
+    try {
+      await fetchJSON("/api/files", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: p }),
+      });
+    } catch (err) {
+      alert(`No se pudo borrar "${p}": ${err.message}`);
+    }
+  }
+  state.filesSelected.clear();
+  loadFiles(state.filesPath);
+});
+
 function openPreview(path, kind) {
   const url = `/api/files/preview?path=${encodeURIComponent(path)}`;
   if (kind === "video") {
@@ -1279,6 +1383,25 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePrevi
 // ═══════════════════════════════════════════════════════════════════════
 
 function renderUploadSelectedExisting() {
+  if (state.uploadSelectedFiles && state.uploadSelectedFiles.length) {
+    const names = state.uploadSelectedFiles.map((f) => f.name).join(", ");
+    const defaultName = state.uploadSelectedFiles.length === 1
+      ? state.uploadSelectedFiles[0].name.replace(/\.[^.]+$/, "")
+      : `${state.uploadSelectedFiles.length} archivos`;
+    els.uploadSelectedExistingEl.classList.remove("hidden");
+    els.uploadSelectedExistingEl.innerHTML =
+      `Vas a subir <strong>${state.uploadSelectedFiles.length} archivo(s)</strong>: ${escapeAttr(names)} ` +
+      `<button type="button" class="tbtn ghost" id="upload-selected-clear">quitar</button>` +
+      `<div class="field" style="margin-top:8px;">` +
+      `<label for="upload-folder-name-input">Nombre de la carpeta destino (donde no hayas elegido una existente)</label>` +
+      `<input type="text" id="upload-folder-name-input" value="${escapeAttr(defaultName)}">` +
+      `</div>`;
+    document.getElementById("upload-selected-clear").addEventListener("click", () => {
+      state.uploadSelectedFiles = null;
+      renderUploadSelectedExisting();
+    });
+    return;
+  }
   if (state.uploadSelectedFolder) {
     els.uploadSelectedExistingEl.classList.remove("hidden");
     els.uploadSelectedExistingEl.innerHTML =
@@ -1481,6 +1604,7 @@ els.uploadFileInput.addEventListener("change", () => {
   if (!els.uploadFileInput.files.length) return;
   state.uploadSelectedFolder = null;
   state.uploadSelectedExisting = null;
+  state.uploadSelectedFiles = null;
   renderUploadSelectedExisting();
 });
 
@@ -1497,7 +1621,7 @@ async function submitUpload() {
     return;
   }
 
-  if (state.uploadSelectedFolder) {
+  if (state.uploadSelectedFolder || state.uploadSelectedFiles) {
     els.submitBtn.disabled = true;
     try {
       const sitesPayload = sites.map((info) => {
@@ -1508,18 +1632,29 @@ async function submitUpload() {
         return { site: info.site, folder_id: folderId, folder_name: folderName };
       });
       const nameInput = document.getElementById("upload-folder-name-input");
-      const newFolderName = (nameInput ? nameInput.value : "").trim() || state.uploadSelectedFolder.name;
+      const defaultName = state.uploadSelectedFolder
+        ? state.uploadSelectedFolder.name
+        : `${state.uploadSelectedFiles.length} archivos`;
+      const newFolderName = (nameInput ? nameInput.value : "").trim() || defaultName;
+      // Same endpoint either way: one request creates N jobs sharing one
+      // batch_id/folder, whether the "N files" came from "everything in
+      // this folder" (path) or a hand-picked subset (paths).
+      const body = state.uploadSelectedFolder
+        ? { path: state.uploadSelectedFolder.path, folder_name: newFolderName, sites: sitesPayload }
+        : { paths: state.uploadSelectedFiles.map((f) => f.path), folder_name: newFolderName, sites: sitesPayload };
       const result = await fetchJSON("/api/uploads/folder-jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: state.uploadSelectedFolder.path, folder_name: newFolderName, sites: sitesPayload }),
+        body: JSON.stringify(body),
       });
       if (result.errors && result.errors.length) {
         els.uploadFormError.textContent = result.errors.join("; ");
       } else {
         closeModal();
+        state.filesSelected.clear();
       }
       state.uploadSelectedFolder = null;
+      state.uploadSelectedFiles = null;
       renderUploadSelectedExisting();
       refreshTasks();
     } catch (err) {

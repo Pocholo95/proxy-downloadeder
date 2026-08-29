@@ -74,6 +74,13 @@
 
       <div class="view-panel" id="files-view" style="display:none;">
         <div id="files-breadcrumb" class="breadcrumb"></div>
+        <div class="bulk-bar" id="files-bulk-bar">
+          <span><span class="count" id="files-bulk-count">0</span> seleccionados</span>
+          <div class="tb-spacer"></div>
+          <button type="button" class="tbtn ghost" id="files-bulk-upload"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 21V8M6 13l6-6 6 6"/><path d="M4 21h16"/></svg>Subir</button>
+          <button type="button" class="tbtn ghost" id="files-bulk-download"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 21h16"/></svg>Descargar</button>
+          <button type="button" class="tbtn ghost" id="files-bulk-delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>Borrar</button>
+        </div>
         <div id="files-list"></div>
       </div>
 

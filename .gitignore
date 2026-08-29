@@ -18,3 +18,8 @@ state/
 vidgrid/node_modules/
 vidgrid/dist/
 vidgrid/desktop/__pycache__/
+
+# browser-extension: local web-ext sign() output/state -- rebuilt on demand
+# (see README), signed .xpi is distributed via GitHub Releases instead.
+extras/browser-extension/web-ext-artifacts/
+extras/browser-extension/.amo-upload-uuid

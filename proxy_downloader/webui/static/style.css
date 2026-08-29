@@ -179,6 +179,10 @@ button { font-family: inherit; }
   font-size: 12.5px;
 }
 .bulk-bar.show { display: flex; }
+/* .view-panel already carries its own horizontal padding -- the bare
+   .bulk-bar margin above is sized for sitting directly in .main (the
+   task table's own case), which has none of its own. */
+.view-panel .bulk-bar { margin: 0 0 10px; }
 .bulk-bar .count { color: var(--accent); font-weight: 600; }
 .bulk-bar .tbtn { height: 26px; padding: 0 9px; }
 
