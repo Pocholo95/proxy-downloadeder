@@ -283,8 +283,15 @@ def api_set_upload_account(site):
     data = request.get_json(silent=True) or {}
     try:
         label = upload_manager.set_account(site, data.get("token"))
-    except (ValueError, upload_sites.UploadError) as e:
+    except ValueError as e:
         return jsonify({"error": str(e)}), 400
+    except upload_sites.UploadError as e:
+        # Covers both "el token no sirve" and "no se pudo conectar con el
+        # sitio" (upload_sites.py now converts network failures into this
+        # same exception type) -- same 502 convention as
+        # /api/uploads/folders/<site> below for "the upstream site is the
+        # problem, not what you sent".
+        return jsonify({"error": str(e)}), 502
     return jsonify({"ok": True, "label": label})
 
 

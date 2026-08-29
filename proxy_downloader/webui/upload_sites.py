@@ -8,8 +8,15 @@ no account, no folders — see its section for why).
 Every function takes credentials explicitly rather than reading site_prefs
 itself — the caller (upload_jobs.py) owns persistence, this stays a plain
 HTTP client. Raises UploadError with a message that's safe to show the user
-directly; anything else (network blip, unexpected JSON shape) is left to
-the caller to catch and report generically.
+directly. The verify/list_folders/create_folder calls (routed through the
+per-site _*_call helpers) also convert a network-level failure -- timeout,
+DNS, connection refused, TLS error -- into an UploadError right here,
+since app.py's routes for those run synchronously in the request handler
+and only ever caught UploadError, not requests' own exception types; an
+uncaught one there was surfacing as Flask's generic 500 page instead of a
+readable error. The actual upload() calls don't need the same treatment:
+they run on upload_jobs.py's background worker thread, which already
+catches any Exception broadly and turns it into a job's error field.
 """
 import hashlib
 import mimetypes
@@ -36,6 +43,17 @@ _SIZE_UNITS = {
 
 class UploadError(Exception):
     pass
+
+
+class UpstreamUnreachable(UploadError):
+    """A site's API couldn't be reached at all (timeout, DNS, connection
+    refused, TLS error) -- distinct from a plain UploadError (the site
+    *did* respond, just with an error) so a verify() below can tell "your
+    token's bad" apart from "we couldn't even ask the site" instead of
+    blindly collapsing every UploadError into a misleading "Token
+    inválido o vencido". Still an UploadError itself, so every existing
+    `except UploadError` elsewhere (app.py's routes) keeps working
+    unchanged."""
 
 
 class _ProgressFile:
@@ -116,8 +134,11 @@ def _gofile_headers(token):
 
 
 def _gofile_call(method, path, token, **kwargs):
-    r = requests.request(method, f"{_GOFILE_API}{path}", headers=_gofile_headers(token),
-                          timeout=TIMEOUT, **kwargs)
+    try:
+        r = requests.request(method, f"{_GOFILE_API}{path}", headers=_gofile_headers(token),
+                              timeout=TIMEOUT, **kwargs)
+    except requests.exceptions.RequestException as e:
+        raise UpstreamUnreachable(f"gofile: no se pudo conectar ({type(e).__name__})")
     try:
         data = r.json()
     except ValueError:
@@ -134,9 +155,12 @@ def gofile_create_guest_token():
     whole batch of files can share it (and one folder created under it)
     via the exact same token-based calls a real account uses below, no
     login involved. Returns (guest_token, root_folder_id)."""
-    r = requests.post(f"{_GOFILE_API}/accounts", json={},
-                       headers={"X-Website-Token": _gofile_wt(""), "X-BL": "en-US", "User-Agent": USER_AGENT},
-                       timeout=TIMEOUT)
+    try:
+        r = requests.post(f"{_GOFILE_API}/accounts", json={},
+                           headers={"X-Website-Token": _gofile_wt(""), "X-BL": "en-US", "User-Agent": USER_AGENT},
+                           timeout=TIMEOUT)
+    except requests.exceptions.RequestException as e:
+        raise UpstreamUnreachable(f"gofile: no se pudo conectar ({type(e).__name__})")
     try:
         data = r.json()
     except ValueError:
@@ -151,6 +175,8 @@ def gofile_verify(token):
     """Returns (label, root_folder_id) on a valid token, raises UploadError otherwise."""
     try:
         info = _gofile_call("GET", "/accounts/getid", token)
+    except UpstreamUnreachable:
+        raise
     except UploadError:
         raise UploadError("Token inválido o vencido")
     account = _gofile_call("GET", f"/accounts/{info['id']}", token)
@@ -240,8 +266,11 @@ def _bunkr_headers(token):
 
 
 def _bunkr_call(method, path, token, **kwargs):
-    r = requests.request(method, f"{_BUNKR_API}/{path}", headers=_bunkr_headers(token),
-                          timeout=TIMEOUT, **kwargs)
+    try:
+        r = requests.request(method, f"{_BUNKR_API}/{path}", headers=_bunkr_headers(token),
+                              timeout=TIMEOUT, **kwargs)
+    except requests.exceptions.RequestException as e:
+        raise UpstreamUnreachable(f"Bunkr: no se pudo conectar ({type(e).__name__})")
     try:
         data = r.json()
     except ValueError:
@@ -375,8 +404,11 @@ def _filester_headers(token):
 
 
 def _filester_call(method, path, token, **kwargs):
-    r = requests.request(method, f"{_FILESTER_API}{path}", headers=_filester_headers(token),
-                          timeout=TIMEOUT, **kwargs)
+    try:
+        r = requests.request(method, f"{_FILESTER_API}{path}", headers=_filester_headers(token),
+                              timeout=TIMEOUT, **kwargs)
+    except requests.exceptions.RequestException as e:
+        raise UpstreamUnreachable(f"Filester: no se pudo conectar ({type(e).__name__})")
     try:
         data = r.json()
     except ValueError:
@@ -389,6 +421,8 @@ def _filester_call(method, path, token, **kwargs):
 def filester_verify(token):
     try:
         data = _filester_call("GET", "/account", token)
+    except UpstreamUnreachable:
+        raise
     except UploadError:
         raise UploadError("Token inválido o vencido")
     info = data["data"]
