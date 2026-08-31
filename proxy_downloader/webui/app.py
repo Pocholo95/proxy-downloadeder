@@ -2,7 +2,9 @@
 same core/proxy/sites engine the CLI uses. See jobs.py for the job manager
 that actually drives downloads on a background thread.
 """
+import json
 import os
+import shutil
 import uuid
 from pathlib import Path
 
@@ -422,46 +424,81 @@ def api_create_upload_folder_jobs():
     host with no login involved, same idea as a downloaded folder staying
     grouped locally.
 
-    Two ways to pick the files, same result either way: `path` (every
-    file directly inside a downloaded folder) or `paths` (an explicit
+    Three ways to pick the files, same result either way: `path` (every
+    file directly inside a downloaded folder), `paths` (an explicit
     hand-picked list, e.g. a multi-select in the Archivos view -- not
-    necessarily everything in one folder, or even all from the same one)."""
-    data = request.get_json(silent=True) or {}
-    sites_payload = data.get("sites") or []
+    necessarily everything in one folder, or even all from the same one),
+    or raw `files` picked straight from the device -- that last one only
+    arrives as multipart/form-data (FormData can't carry files any other
+    way), so `sites`/`folder_name` ride along as form fields instead of a
+    JSON body in that case."""
+    uploaded_files = request.files.getlist("files")
+    is_temp_source = False
+    # Only populated for the raw-upload branch below -- tmp_path's own name
+    # is uuid-prefixed to dodge collisions, not what the UI/job record
+    # should show as the source filename.
+    source_names = {}
+
+    if uploaded_files:
+        try:
+            sites_payload = json.loads(request.form.get("sites") or "[]")
+        except ValueError:
+            return jsonify({"error": "invalid sites payload"}), 400
+        folder_name_raw = request.form.get("folder_name", "")
+
+        Path(UPLOAD_TMP_DIR).mkdir(parents=True, exist_ok=True)
+        local_files = []
+        for f in uploaded_files:
+            if not f.filename:
+                continue
+            name = secure_filename(f.filename) or "upload.bin"
+            tmp_path = Path(UPLOAD_TMP_DIR) / f"{uuid.uuid4().hex}-{name}"
+            f.save(tmp_path)
+            local_files.append(tmp_path)
+            source_names[tmp_path] = f.filename
+        if not local_files:
+            return jsonify({"error": "no file"}), 400
+        is_temp_source = True
+        default_name = f"{len(local_files)} archivos"
+    else:
+        data = request.get_json(silent=True) or {}
+        sites_payload = data.get("sites") or []
+        folder_name_raw = data.get("folder_name") or ""
+
+        explicit_paths = data.get("paths")
+        if explicit_paths:
+            try:
+                local_files = []
+                for rel in explicit_paths:
+                    p = files_api.safe_path(OUTPUT_DIR, rel)
+                    if p.is_file() and p.suffix != ".part":
+                        local_files.append(p)
+            except files_api.UnsafePath:
+                return jsonify({"error": "invalid path"}), 400
+            if not local_files:
+                return jsonify({"error": "Ningún archivo válido en la selección"}), 400
+            default_name = f"{len(local_files)} archivos"
+        else:
+            try:
+                folder_path = files_api.safe_path(OUTPUT_DIR, data.get("path", ""))
+            except files_api.UnsafePath:
+                return jsonify({"error": "invalid path"}), 400
+            if not folder_path.is_dir():
+                return jsonify({"error": "not found"}), 404
+            local_files = sorted(p for p in folder_path.iterdir() if p.is_file() and p.suffix != ".part")
+            if not local_files:
+                return jsonify({"error": "La carpeta está vacía"}), 400
+            default_name = folder_path.name
+
     if not sites_payload:
         return jsonify({"error": "Marcá al menos un sitio destino"}), 400
 
-    explicit_paths = data.get("paths")
-    if explicit_paths:
-        try:
-            local_files = []
-            for rel in explicit_paths:
-                p = files_api.safe_path(OUTPUT_DIR, rel)
-                if p.is_file() and p.suffix != ".part":
-                    local_files.append(p)
-        except files_api.UnsafePath:
-            return jsonify({"error": "invalid path"}), 400
-        if not local_files:
-            return jsonify({"error": "Ningún archivo válido en la selección"}), 400
-        default_name = f"{len(local_files)} archivos"
-    else:
-        try:
-            folder_path = files_api.safe_path(OUTPUT_DIR, data.get("path", ""))
-        except files_api.UnsafePath:
-            return jsonify({"error": "invalid path"}), 400
-        if not folder_path.is_dir():
-            return jsonify({"error": "not found"}), 404
-        local_files = sorted(p for p in folder_path.iterdir() if p.is_file() and p.suffix != ".part")
-        if not local_files:
-            return jsonify({"error": "La carpeta está vacía"}), 400
-        default_name = folder_path.name
-
     # Defaults to the local folder's own name (or "N archivos" for an
-    # explicit selection), but the UI lets the user override it -- this is
-    # only what gets used for a *newly created* destination folder (guest
-    # or real-account); a site where an existing folder was picked instead
-    # (choice["folder_id"] below) ignores it.
-    new_folder_name = (data.get("folder_name") or "").strip() or default_name
+    # explicit/device selection), but the UI lets the user override it --
+    # this is only what gets used for a *newly created* destination folder
+    # (guest or real-account); a site where an existing folder was picked
+    # instead (choice["folder_id"] below) ignores it.
+    new_folder_name = folder_name_raw.strip() or default_name
 
     configured = {s["site"]: s["configured"] for s in upload_manager.list_upload_sites()}
     # Every job from this one request shares this batch id/label -- the N
@@ -496,10 +533,27 @@ def api_create_upload_folder_jobs():
             continue
 
         for f in local_files:
-            job = upload_manager.create_job(site, f, f.name, dest_folder_id=folder_id,
+            job_source = f
+            if is_temp_source:
+                # A temp source gets deleted by the job that owns it once
+                # that job finishes -- can't let two jobs (one per site)
+                # share the same on-disk file, so each site gets its own
+                # independent copy instead of reusing the just-uploaded one.
+                job_source = f.parent / f"{uuid.uuid4().hex}-{f.name}"
+                shutil.copy2(f, job_source)
+            job = upload_manager.create_job(site, job_source, source_names.get(f, f.name), dest_folder_id=folder_id,
                                              dest_folder_name=folder_name, guest_token=guest_token,
-                                             batch_id=batch_id, batch_label=batch_label)
+                                             batch_id=batch_id, batch_label=batch_label,
+                                             is_temp_source=is_temp_source)
             created.append(job.to_dict())
+
+    if is_temp_source:
+        # local_files here are the staging copies saved straight from the
+        # request above -- every job got its own independent copy instead
+        # (see job_source above), so these were never any job's source_path
+        # and won't get cleaned up by a job finishing.
+        for f in local_files:
+            f.unlink(missing_ok=True)
 
     if not created and errors:
         return jsonify({"error": "; ".join(errors)}), 400

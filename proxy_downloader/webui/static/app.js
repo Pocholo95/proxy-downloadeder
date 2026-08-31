@@ -1665,6 +1665,16 @@ function renderUploadSelectedExisting() {
     });
     return;
   }
+  if (!state.uploadSelectedExisting && els.uploadFileInput.files.length > 1) {
+    const n = els.uploadFileInput.files.length;
+    els.uploadSelectedExistingEl.classList.remove("hidden");
+    els.uploadSelectedExistingEl.innerHTML =
+      `<div class="field">` +
+      `<label for="upload-folder-name-input">Nombre de la carpeta destino (donde no hayas elegido una existente)</label>` +
+      `<input type="text" id="upload-folder-name-input" value="${escapeAttr(`${n} archivos`)}">` +
+      `</div>`;
+    return;
+  }
   if (!state.uploadSelectedExisting) {
     els.uploadSelectedExistingEl.classList.add("hidden");
     els.uploadSelectedExistingEl.innerHTML = "";
@@ -1856,6 +1866,20 @@ els.uploadFileInput.addEventListener("change", () => {
   renderUploadSelectedExisting();
 });
 
+// Per-site {site, folder_id, folder_name} for /api/uploads/folder-jobs --
+// an existing folder the user picked from the dropdown, or null/null to
+// let that endpoint create a new one (named from the batch's folder-name
+// field) instead.
+function buildFolderSitesPayload(sites) {
+  return sites.map((info) => {
+    const folderId = info.has_folders ? (state.uploadFolderChoiceBySite[info.site] || null) : null;
+    const folderName = folderId
+      ? ((state.uploadFoldersBySite[info.site] || []).find((f) => f.id === folderId) || {}).name
+      : null;
+    return { site: info.site, folder_id: folderId, folder_name: folderName };
+  });
+}
+
 async function submitUpload() {
   els.uploadFormError.textContent = "";
   const sites = [...state.uploadSelectedSites].map(siteInfo).filter(Boolean);
@@ -1872,13 +1896,7 @@ async function submitUpload() {
   if (state.uploadSelectedFolder || state.uploadSelectedFiles) {
     els.submitBtn.disabled = true;
     try {
-      const sitesPayload = sites.map((info) => {
-        const folderId = info.has_folders ? (state.uploadFolderChoiceBySite[info.site] || null) : null;
-        const folderName = folderId
-          ? ((state.uploadFoldersBySite[info.site] || []).find((f) => f.id === folderId) || {}).name
-          : null;
-        return { site: info.site, folder_id: folderId, folder_name: folderName };
-      });
+      const sitesPayload = buildFolderSitesPayload(sites);
       const nameInput = document.getElementById("upload-folder-name-input");
       const defaultName = state.uploadSelectedFolder
         ? state.uploadSelectedFolder.name
@@ -1916,6 +1934,39 @@ async function submitUpload() {
   const files = [...els.uploadFileInput.files];
   if (!files.length && !state.uploadSelectedExisting) {
     els.uploadFormError.textContent = "Elegí un archivo del dispositivo o uno ya descargado";
+    return;
+  }
+
+  if (files.length > 1 && !state.uploadSelectedExisting) {
+    // Several files straight from the device -- group them into one
+    // destination folder per site (nameable below the file input) instead
+    // of N independent one-file uploads, same idea as the Archivos-picked
+    // batch flow above but via multipart/form-data since these files were
+    // never saved server-side yet.
+    els.submitBtn.disabled = true;
+    try {
+      const nameInput = document.getElementById("upload-folder-name-input");
+      const newFolderName = (nameInput ? nameInput.value : "").trim() || `${files.length} archivos`;
+
+      const form = new FormData();
+      form.append("sites", JSON.stringify(buildFolderSitesPayload(sites)));
+      form.append("folder_name", newFolderName);
+      for (const file of files) form.append("files", file);
+
+      const result = await fetchJSON("/api/uploads/folder-jobs", { method: "POST", body: form });
+      if (result.errors && result.errors.length) {
+        els.uploadFormError.textContent = result.errors.join("; ");
+      } else {
+        closeModal();
+      }
+      els.uploadFileInput.value = "";
+      renderUploadSelectedExisting();
+      refreshTasks();
+    } catch (err) {
+      els.uploadFormError.textContent = err.message;
+    } finally {
+      els.submitBtn.disabled = false;
+    }
     return;
   }
 
