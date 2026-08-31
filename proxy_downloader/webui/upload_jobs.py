@@ -283,33 +283,29 @@ class UploadManager:
         return len(to_remove)
 
     def retry_job(self, job_id):
-        """Re-submits a failed upload as a new job with the same
-        site/source/destination. Ownership of a temp (device-uploaded)
-        source file moves to the new job — the old failed entry is marked
-        as no longer owning it, so deleting either the old or the new job
-        from history can never race against the other still reading/
-        writing the same file."""
+        """Re-queues a failed upload in place -- same id, same spot in the
+        list -- instead of the old behavior of creating a brand new job
+        and deleting the failed one: that still left the retry looking
+        like an unrelated new task jumping to the top of the list rather
+        than the failed row actually being replaced where it was."""
         src = self.jobs.get(job_id)
         if not src:
             raise ValueError("Job not found")
         with src.lock:
             if src.status != "error":
                 raise ValueError("Solo se puede reintentar un trabajo que falló")
-            source_path = src.source_path
-            is_temp_source = src.is_temp_source
-            guest_token = src.guest_token
-            batch_id, batch_label = src.batch_id, src.batch_label
-        if not source_path or not Path(source_path).exists():
-            raise ValueError("El archivo original ya no está disponible — subilo de nuevo")
-
-        job = self.create_job(src.site, source_path, src.source_name,
-                               dest_folder_id=src.dest_folder_id, dest_folder_name=src.dest_folder_name,
-                               is_temp_source=is_temp_source, guest_token=guest_token,
-                               batch_id=batch_id, batch_label=batch_label)
-        with src.lock:
-            src.is_temp_source = False
+            if not src.source_path or not Path(src.source_path).exists():
+                raise ValueError("El archivo original ya no está disponible — subilo de nuevo")
+            src.status = "queued"
+            src.error = None
+            src.url = None
+            src.folder_url = None
+            src.bytes_sent = 0
+            src.started_at = None
+            src.finished_at = None
         self._persist()
-        return job
+        self._queue.put(src.id)
+        return src
 
     # ── worker ──
     def _worker_loop(self):

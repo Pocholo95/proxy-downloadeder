@@ -101,7 +101,6 @@ class Job:
         # to a real download instead of holding again.
         self.hold = hold
         self.error = None
-        self.retry_of = None            # id of the job this one retries, if any
         self.created_at = time.time()
         self.started_at = None
         self.finished_at = None
@@ -132,7 +131,6 @@ class Job:
                 "speed": self.speed,
                 "status": self.status,
                 "error": self.error,
-                "retry_of": self.retry_of,
                 "created_at": self.created_at,
                 "started_at": self.started_at,
                 "finished_at": self.finished_at,
@@ -151,7 +149,6 @@ class Job:
                    data.get("proxy_mode", "auto"), data.get("speed") or MIN_SPEED_KB)
         job.status = data.get("status", "error")
         job.error = data.get("error")
-        job.retry_of = data.get("retry_of")
         job.created_at = data.get("created_at") or time.time()
         job.started_at = data.get("started_at")
         job.finished_at = data.get("finished_at")
@@ -370,36 +367,49 @@ class JobManager:
         return len(to_remove)
 
     def retry_job(self, job_id):
+        """Re-queues the failed/cancelled items of a terminated job in
+        place -- same id, same spot in the list -- instead of the old
+        behavior of spinning up a brand new job for just those items:
+        that left the original sitting in the list forever (a permanent
+        "fallido" row next to its own retry) and, since new jobs are
+        appended, made the retry jump to the very top instead of staying
+        where the thing being retried already was.
+
+        Only the failed/cancelled entries get rebuilt (fresh provider
+        reference + reset progress, via _mk_item); anything that already
+        succeeded stays untouched in job.items, and _run_job()'s main loop
+        skips any item still marked "done" instead of redownloading it."""
         src = self.jobs.get(job_id)
         if not src:
             raise ValueError("Job not found")
         with src.lock:
             if src.status not in TERMINAL_STATUSES or src.status == "done":
                 raise ValueError("Solo se puede reintentar un trabajo terminado con fallos")
-            failed_items = [dict(it) for it in src.items if it["status"] in ("failed", "cancelled")]
-        if not failed_items:
-            raise ValueError("No hay items fallidos para reintentar")
 
-        preset = []
-        for it in failed_items:
-            provider = registry.get(it["site"])
-            if not provider:
-                continue
-            preset.append(self._mk_item(provider, it["file_id"], it.get("hint_name"), it["dest_dir"]))
-        if not preset:
-            raise ValueError("No se pudo reconstruir ningún item fallido")
+            new_items = []
+            any_retried = False
+            for it in src.items:
+                if it["status"] in ("failed", "cancelled"):
+                    provider = registry.get(it["site"])
+                    if provider:
+                        new_items.append(self._mk_item(provider, it["file_id"], it.get("hint_name"), it["dest_dir"]))
+                        any_retried = True
+                        continue
+                new_items.append(it)
+            if not any_retried:
+                raise ValueError("No hay items fallidos para reintentar")
 
-        job_id_new = uuid.uuid4().hex[:12]
-        job = Job(job_id_new, src.kind, src.raw_input, src.output_dir, src.proxy_mode, src.speed)
-        job.retry_of = src.id
+            src.items = new_items
+            src.status = "queued"
+            src.error = None
+            src.finished_at = None
+            src.cancel_event.clear()
 
         with self._meta_lock:
-            self.jobs[job.id] = job
-            self.order.append(job.id)
-            self._preset_items[job.id] = preset
+            self._preset_items[src.id] = new_items
         self._persist()
-        self._queue.put(job.id)
-        return job
+        self._queue.put(src.id)
+        return src
 
     # ── worker ──
     def _worker_loop(self):
@@ -472,6 +482,12 @@ class JobManager:
             for item in items:
                 if job.cancel_event.is_set():
                     break
+                if item["status"] == "done":
+                    # An in-place retry_job() only rebuilds the items that
+                    # failed -- whatever already succeeded stays in this
+                    # same list (so the job's own item table still shows
+                    # it), but shouldn't be downloaded a second time.
+                    continue
                 provider = item["provider"]
                 wants_proxy = _job_uses_proxy(provider, args)
                 use_proxy = proxy_pool is not None and wants_proxy
