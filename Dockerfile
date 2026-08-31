@@ -6,7 +6,12 @@ WORKDIR /app
 # relocates an MP4's moov atom to the front so the browser can stream/seek
 # it before the whole file has downloaded (no video/audio re-encoding), and
 # by yt-dlp to mux separately-downloaded video+audio streams into one file.
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+# aria2: the actual fetch engine (resumable, multi-connection) for every
+# download that doesn't need per-chunk proxy rotation -- see
+# proxy_downloader/core/aria2.py. Proxy-pool downloads stay on `requests`,
+# since aria2 can't hop proxies mid-download the way this app's own speed-
+# based rotation does.
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg aria2 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt requirements-webui.txt ./
