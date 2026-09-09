@@ -21,6 +21,7 @@ services:
       - "traefik.http.routers.proxy-downloader.rule=Host(`${TRAEFIK_HOST:-downloader.localhost}`)"
       - "traefik.http.routers.proxy-downloader.entrypoints=${TRAEFIK_ENTRYPOINTS:-websecure}"
       - "traefik.http.routers.proxy-downloader.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}"
+      - "traefik.http.routers.proxy-downloader.service=proxy-downloader"
       - "traefik.http.services.proxy-downloader.loadbalancer.server.port=8080"
       # This app has no login — anyone who can reach it can start
       # downloads, and browse/delete anything under /downloads. Uncomment
