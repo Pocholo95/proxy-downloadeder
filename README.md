@@ -505,7 +505,6 @@ nuevo, así que borrar un intento viejo del historial nunca compite por el
 mismo archivo con uno que sigue vivo).
 
 ```bash
-docker network create proxy   # una vez, salvo que ya tengas una red externa "proxy" (p. ej. la que usa tu Traefik)
 docker compose up -d --build
 ```
 
@@ -517,38 +516,16 @@ Abrí `http://localhost:8080`. Por defecto:
 - `./state` (host) → `/app/state` — caché de proxies validados entre
   reinicios del contenedor.
 
-Esas rutas y el puerto salen de variables de entorno con default (`WEB_PORT`,
-`DOWNLOADS_PATH`, `CONFIG_PATH`, `STATE_PATH` — ver `.env.example`), así que
-no hace falta tocar `docker-compose.yml` para cambiarlas: copiá
-`.env.example` a `.env` y editalo, o si estás desplegando desde un stack
-manager que lee el compose directo de este repo (Portainer, **Arcane**,
-Dockge, etc. — donde el archivo suele quedar de solo lectura porque viene de
-git), cargá esas mismas variables en la sección de "Environment
-variables"/"Environment" del stack en su UI.
+El `docker-compose.yml` es a propósito lo más simple posible (puerto y
+rutas fijos, sin variables de entorno ni labels de terceros) para que sirva
+como punto de partida genérico — para cambiar el puerto, las rutas
+montadas, agregar un reverse proxy (Traefik, Caddy, nginx…) o restringir el
+acceso, editalo directamente vos.
 
-### Traefik
-
-El compose ya trae los labels de Traefik, apagados por defecto
-(`traefik.enable=false`) y controlados por variables de entorno — mismo
-mecanismo que las rutas de arriba, no hace falta tocar el archivo:
-
-```bash
-TRAEFIK_ENABLE=true
-TRAEFIK_HOST=downloader.tudominio.com
-TRAEFIK_ENTRYPOINTS=websecure       # default
-TRAEFIK_CERTRESOLVER=letsencrypt    # default
-```
-
-Requiere que el contenedor esté en la misma red externa que tu Traefik —
-el compose ya lo conecta a una red externa llamada `proxy` (`docker network
-create proxy` si todavía no la tenés; si tu Traefik usa otro nombre de red,
-editá el `docker-compose.yml` local, ahí sí es un valor fijo, no variable).
-
-Esta app no tiene login: cualquiera que llegue a la URL puede lanzar
-descargas y browsear/borrar lo que hay en `/downloads`. Si la exponés por
-Traefik a internet, considerá restringirla con un middleware de IP allowlist
-(hay un ejemplo comentado en el propio `docker-compose.yml`) o dejarla solo
-accesible por VPN/LAN.
+Esta app no tiene login: cualquiera que llegue al puerto expuesto puede
+lanzar descargas y browsear/borrar lo que hay en `/downloads`. Si la exponés
+más allá de tu LAN/VPN, restringí el acceso vos mismo (firewall, reverse
+proxy con auth, VPN, etc.).
 
 Sin `docker compose`:
 
