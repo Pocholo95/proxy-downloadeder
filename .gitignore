@@ -9,6 +9,11 @@ downloads/
 state/
 .env
 
+# Your own deploy config, copied from docker-compose.yml.example -- edit
+# it freely (ports, volumes, a reverse proxy's labels, whatever your setup
+# needs) without git ever seeing it as a local change to a tracked file.
+docker-compose.yml
+
 # browser-extension: local web-ext sign() output/state -- rebuilt on demand
 # (see README), signed .xpi is distributed via GitHub Releases instead.
 extras/browser-extension/web-ext-artifacts/

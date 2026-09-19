@@ -505,6 +505,7 @@ nuevo, así que borrar un intento viejo del historial nunca compite por el
 mismo archivo con uno que sigue vivo).
 
 ```bash
+cp docker-compose.yml.example docker-compose.yml
 docker compose up -d --build
 ```
 
@@ -516,11 +517,13 @@ Abrí `http://localhost:8080`. Por defecto:
 - `./state` (host) → `/app/state` — caché de proxies validados entre
   reinicios del contenedor.
 
-El `docker-compose.yml` es a propósito lo más simple posible (puerto y
+`docker-compose.yml.example` es a propósito lo más simple posible (puerto y
 rutas fijos, sin variables de entorno ni labels de terceros) para que sirva
-como punto de partida genérico — para cambiar el puerto, las rutas
-montadas, agregar un reverse proxy (Traefik, Caddy, nginx…) o restringir el
-acceso, editalo directamente vos.
+como punto de partida genérico. Tu copia real, `docker-compose.yml`, está en
+`.gitignore` — editala como quieras (puerto, rutas montadas, un reverse
+proxy como Traefik/Caddy/nginx, lo que necesite tu setup) sin que git la vea
+nunca como un cambio a un archivo trackeado, así que un `git pull` para
+actualizar el código nunca la toca ni entra en conflicto con ella.
 
 Esta app no tiene login: cualquiera que llegue al puerto expuesto puede
 lanzar descargas y browsear/borrar lo que hay en `/downloads`. Si la exponés
