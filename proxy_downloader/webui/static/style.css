@@ -1,37 +1,40 @@
-/* Design tokens ported from VidGrid's shadcn/ui-based theme (its "classic"
-   navy + sky-blue variant — the closest match to this app's existing blue
-   accent, so the shared color language reads as a deliberate choice, not a
-   reskin from scratch). Same oklch tokens, same radius/shadow scale,
-   translated into plain CSS since this app has no build step / Tailwind. */
+/* Design tokens: a "signal blue" accent (distinct from a generic dashboard
+   blue) paired with IBM Plex -- a typeface family designed for technical/
+   software interfaces, with a real matching mono for the numbers, paths and
+   speeds this app is full of. Variable NAMES kept stable from the previous
+   theme on purpose (jobs.js references them throughout via var(...) in
+   inline styles/template strings) -- only the values changed. Dark-only,
+   same as before (this runs 24/7 as a background daemon's dashboard, never
+   asked for a light mode). */
 :root {
-  --background: oklch(0.21 0.04 264);
-  --sidebar: oklch(0.18 0.035 264);
-  --foreground: oklch(0.93 0.01 256);
-  --card: oklch(0.25 0.04 264);
-  --card-foreground: oklch(0.93 0.01 256);
-  --popover: oklch(0.25 0.04 264);
-  --popover-foreground: oklch(0.93 0.01 256);
-  --primary: oklch(0.74 0.15 230);
-  --primary-foreground: oklch(0.16 0.04 264);
-  --secondary: oklch(0.28 0.04 264);
-  --secondary-foreground: oklch(0.93 0.01 256);
-  --muted: oklch(0.28 0.04 264);
-  --muted-foreground: oklch(0.65 0.025 256);
-  --faint: oklch(0.48 0.02 256);
-  --accent: oklch(0.83 0.1 230);
-  --accent-foreground: oklch(0.93 0.01 256);
-  --destructive: oklch(0.69 0.2 23);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.83 0.1 230 / 0.22);
-  --border-strong: oklch(0.83 0.1 230 / 0.34);
-  --input: oklch(0.83 0.1 230 / 0.14);
-  --ring: oklch(0.74 0.15 230);
-  --primary-dim: oklch(0.74 0.15 230 / 0.14);
-  --green: oklch(0.72 0.17 155);
-  --green-dim: oklch(0.72 0.17 155 / 0.15);
-  --yellow: oklch(0.75 0.15 85);
-  --yellow-dim: oklch(0.75 0.15 85 / 0.15);
-  --red-dim: oklch(0.69 0.2 23 / 0.15);
+  --background: oklch(0.17 0.018 260);
+  --sidebar: oklch(0.145 0.018 260);
+  --foreground: oklch(0.93 0.008 260);
+  --card: oklch(0.21 0.02 260);
+  --card-foreground: oklch(0.93 0.008 260);
+  --popover: oklch(0.21 0.02 260);
+  --popover-foreground: oklch(0.93 0.008 260);
+  --primary: oklch(0.72 0.15 245);
+  --primary-foreground: oklch(0.15 0.02 250);
+  --secondary: oklch(0.25 0.022 260);
+  --secondary-foreground: oklch(0.93 0.008 260);
+  --muted: oklch(0.25 0.022 260);
+  --muted-foreground: oklch(0.72 0.014 260);
+  --faint: oklch(0.55 0.016 260);
+  --accent: oklch(0.78 0.13 245);
+  --accent-foreground: oklch(0.93 0.008 260);
+  --destructive: oklch(0.68 0.19 25);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.32 0.02 260);
+  --border-strong: oklch(0.4 0.02 260);
+  --input: oklch(0.25 0.022 260);
+  --ring: oklch(0.72 0.15 245);
+  --primary-dim: oklch(0.72 0.15 245 / 0.16);
+  --green: oklch(0.72 0.16 155);
+  --green-dim: oklch(0.72 0.16 155 / 0.15);
+  --yellow: oklch(0.78 0.15 80);
+  --yellow-dim: oklch(0.78 0.15 80 / 0.16);
+  --red-dim: oklch(0.68 0.19 25 / 0.16);
 
   --radius: 0.625rem;
   --radius-sm: calc(var(--radius) - 4px);
@@ -40,8 +43,11 @@
   --radius-xl: calc(var(--radius) + 4px);
   --radius-full: 999px;
 
-  --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.55), 0 -1px 0 rgba(255, 255, 255, 0.05);
-  --shadow-md: 0 6px 14px rgba(0, 0, 0, 0.6), 0 2px 6px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.4), 0 -1px 0 rgba(255, 255, 255, 0.03);
+  --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 32px rgba(0, 0, 0, 0.35);
+
+  --font-ui: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, "SF Mono", Menlo, monospace;
 
   color-scheme: dark;
 }
@@ -51,7 +57,7 @@ html, body { height: 100%; }
 
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-ui);
   font-size: 13.5px;
   background: var(--background);
   color: var(--foreground);
@@ -59,7 +65,7 @@ body {
   overflow: hidden;
 }
 
-.num { font-variant-numeric: tabular-nums; }
+.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 button { font-family: inherit; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -74,8 +80,8 @@ button { font-family: inherit; }
 .shell {
   height: 100vh;
   display: grid;
-  grid-template-columns: 240px 1fr;
-  grid-template-rows: 54px 1fr 30px;
+  grid-template-columns: 250px 1fr;
+  grid-template-rows: 56px 1fr 30px;
   grid-template-areas:
     "topbar topbar"
     "sidebar main"
@@ -148,10 +154,10 @@ button { font-family: inherit; }
   color: var(--faint); padding: 0 8px; margin-bottom: 4px;
 }
 .side-item {
-  display: flex; align-items: center; gap: 8px;
-  padding: 6px 8px; border-radius: var(--radius-sm);
+  display: flex; align-items: center; gap: 9px;
+  padding: 7px 10px; border-radius: 7px;
   cursor: pointer; color: var(--muted-foreground); user-select: none;
-  font-size: 12.8px;
+  font-size: 12.5px; font-weight: 500;
 }
 .side-item:hover { background: var(--secondary); color: var(--foreground); }
 .side-item.active { background: var(--primary-dim); color: var(--accent); font-weight: 600; }
@@ -361,6 +367,20 @@ select { width: 100%; }
 
 .error-msg { color: var(--destructive); font-size: 11.5px; }
 
+/* ── Live per-line engine detection (Agregar → Archivo/Carpeta, Batch) ─
+   A client-side approximation of download_router.py's own classify_line()
+   -- this is a preview only, the actual routing decision is always made
+   server-side by POST /api/downloads; if the two ever disagree the server
+   wins, this just shouldn't disagree often since it mirrors the same
+   domain rules. ─────────────────────────────────────────────────────── */
+.detect-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.detect-row { display: flex; align-items: center; gap: 8px; font-size: 11.5px; padding: 6px 9px; background: var(--secondary); border-radius: 6px; }
+.detect-row .u { font-family: var(--font-mono); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted-foreground); }
+.engine-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 600; padding: 2px 7px; border-radius: 999px; flex-shrink: 0; white-space: nowrap; }
+.engine-chip.mediafire { background: var(--yellow-dim); color: var(--yellow); }
+.engine-chip.gallery { background: var(--primary-dim); color: var(--accent); }
+.engine-chip.none { background: var(--red-dim); color: var(--destructive); }
+
 .upload-site-checks { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
 .upload-site-check { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--foreground); cursor: pointer; }
 .upload-site-check input { cursor: pointer; }
@@ -373,25 +393,33 @@ select { width: 100%; }
 
 /* ── Modal ─────────────────────────────────────────────────────────── */
 
+/* The "Agregar" and file-manager panels are side sheets, not centered
+   dialogs -- they hold a running list of fields/results you build up (a
+   batch of URLs, a folder picker) more than a single yes/no prompt, so
+   anchoring them to an edge like a persistent workspace reads better than
+   a modal that interrupts the middle of the screen. */
 .modal-backdrop {
-  display: none; position: fixed; inset: 0; background: oklch(0.1 0.02 264 / 0.6);
-  align-items: center; justify-content: center; z-index: 50; padding: 24px;
+  display: none; position: fixed; inset: 0; background: oklch(0.1 0.02 260 / 0.45);
+  align-items: stretch; justify-content: flex-end; z-index: 50;
 }
 .modal-backdrop.show { display: flex; }
 .modal {
-  width: 600px; max-width: 100%; max-height: 100%;
-  background: var(--card); border: 1px solid var(--border-strong); border-radius: 12px;
+  width: 480px; max-width: 92vw; height: 100%;
+  background: var(--card); border-left: 1px solid var(--border-strong); border-radius: 0;
   box-shadow: var(--shadow-md); display: flex; flex-direction: column; overflow: hidden;
 }
-.modal-head { display: flex; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--border); }
-.modal-head h3 { margin: 0; font-size: 14px; font-weight: 600; flex: 1; }
+.modal-head { display: flex; align-items: center; padding: 18px 20px; border-bottom: 1px solid var(--border); }
+.modal-head h3 { margin: 0; font-size: 15.5px; font-weight: 650; flex: 1; }
 .modal-close { width: 26px; height: 26px; border-radius: var(--radius-sm); background: transparent; border: none; color: var(--muted-foreground); cursor: pointer; display: flex; align-items: center; justify-content: center; }
 .modal-close:hover { background: var(--secondary); color: var(--foreground); }
-.modal-tabs { display: flex; gap: 2px; padding: 8px 16px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
-.mtab { padding: 8px 12px; font-size: 12.5px; font-weight: 500; color: var(--muted-foreground); background: transparent; border: none; border-bottom: 2px solid transparent; cursor: pointer; }
-.mtab.active { color: var(--accent); border-bottom-color: var(--primary); }
-.modal-body { padding: 16px; overflow-y: auto; max-height: 65vh; }
-.modal-foot { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-top: 1px solid var(--border); }
+/* A segmented control, not a tab strip -- these are mutually exclusive
+   input modes (one URL / a batch / a video link / upload), not separate
+   pages, so a pill-group reads more like "pick a mode" than "navigate". */
+.modal-tabs { display: flex; gap: 2px; margin: 20px 20px 0; padding: 3px; background: var(--secondary); border: 1px solid var(--border); border-radius: 8px; }
+.mtab { flex: 1; padding: 7px; font-size: 12px; font-weight: 500; color: var(--muted-foreground); background: transparent; border: none; border-radius: 6px; cursor: pointer; }
+.mtab.active { color: var(--foreground); background: var(--card); box-shadow: var(--shadow-sm); }
+.modal-body { padding: 20px; overflow-y: auto; flex: 1; }
+.modal-foot { display: flex; align-items: center; gap: 10px; padding: 16px 20px; border-top: 1px solid var(--border); }
 
 /* ── Preview modal (video/audio/image) ────────────────────────────── */
 

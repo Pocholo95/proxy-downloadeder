@@ -20,6 +20,7 @@ from collections import deque
 from pathlib import Path
 
 import gallery_dl.config
+import gallery_dl.extractor
 import gallery_dl.job
 
 from .. import proxy_sources
@@ -35,7 +36,7 @@ MAX_PROXY_ATTEMPTS = 5  # whole-job retries with a fresh proxy on a hard (not ju
 
 class GalleryJob:
     def __init__(self, job_id, url, output_dir, proxy_mode, min_speed_kb=None,
-                 batch_id=None, batch_label=None):
+                 batch_id=None, batch_label=None, site=None):
         self.id = job_id
         self.url = url
         self.output_dir = output_dir
@@ -43,6 +44,11 @@ class GalleryJob:
         self.min_speed_kb = min_speed_kb or MIN_SPEED_KB
         self.batch_id = batch_id
         self.batch_label = batch_label
+        # The real site (pixeldrain/bunkr/gofile/filester), not just
+        # "gallery-dl" -- resolved once via gallery_dl.extractor.find() so
+        # the UI can show the same per-site badge/color it already uses for
+        # everything else instead of one generic label for all four.
+        self.site = site or "gallery-dl"
         self.status = "queued"  # queued|running|cancelling|done|done_with_errors|error|cancelled
         self.error = None
         self.items = []  # [{filename, bytes_done, total, speed_kb, status}], populated live
@@ -93,6 +99,7 @@ class GalleryJob:
             return {
                 "id": self.id,
                 "url": self.url,
+                "site": self.site,
                 "output_dir": self.output_dir,
                 "proxy_mode": self.proxy_mode,
                 "min_speed_kb": self.min_speed_kb,
@@ -117,7 +124,7 @@ class GalleryJob:
     @classmethod
     def from_dict(cls, d):
         job = cls(d["id"], d["url"], d["output_dir"], d.get("proxy_mode", "auto"),
-                   min_speed_kb=d.get("min_speed_kb"),
+                   min_speed_kb=d.get("min_speed_kb"), site=d.get("site"),
                    batch_id=d.get("batch_id"), batch_label=d.get("batch_label"))
         job.status = d.get("status", "error")
         job.error = d.get("error")
@@ -208,8 +215,13 @@ class GalleryJobManager:
 
         out_dir = Path(output_dir).expanduser() if output_dir else self.base_output_dir
         job_id = uuid.uuid4().hex[:12]
+        try:
+            ext = gallery_dl.extractor.find(url)
+            site = ext.category if ext else None
+        except Exception:
+            site = None
         job = GalleryJob(job_id, url, str(out_dir), proxy_mode, min_speed_kb=speed,
-                          batch_id=batch_id, batch_label=batch_label)
+                          batch_id=batch_id, batch_label=batch_label, site=site)
         with self._meta_lock:
             self.jobs[job_id] = job
             self.order.append(job_id)

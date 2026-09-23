@@ -65,6 +65,8 @@ const els = {
   inputSingle: document.getElementById("value-single"),
   inputBatch: document.getElementById("value-batch"),
   inputVideo: document.getElementById("value-video"),
+  detectSingle: document.getElementById("detect-single"),
+  detectBatch: document.getElementById("detect-batch"),
   outputDir: document.getElementById("output-dir"),
   proxyMode: document.getElementById("proxy-mode"),
   minSpeed: document.getElementById("min-speed"),
@@ -236,12 +238,12 @@ const GALLERY_DELETABLE = new Set(["done", "done_with_errors", "error", "cancell
 const SITE_COLOR = {
   pixeldrain: "oklch(0.72 0.17 155)",
   gofile: "oklch(0.74 0.15 230)",
-  "1fichier": "oklch(0.75 0.15 85)",
-  mega: "oklch(0.7 0.18 25)",
   bunkr: "oklch(0.72 0.16 320)",
   filester: "oklch(0.75 0.13 190)",
   mediafire: "oklch(0.73 0.17 55)",
   fileditch: "oklch(0.72 0.14 280)",
+  "yt-dlp": "oklch(0.68 0.19 25)",
+  "extensión": "oklch(0.7 0.15 300)",
 };
 function siteSwatch(site) {
   const color = SITE_COLOR[site] || "var(--faint)";
@@ -294,9 +296,48 @@ els.modalTabs.querySelectorAll(".mtab").forEach((tab) => {
   tab.addEventListener("click", () => setModalKind(tab.dataset.kind));
 });
 
+// Live preview of which engine each pasted line will actually go to --
+// a client-side approximation of download_router.py's classify_line(),
+// mirroring the same domains. Preview only: the real routing decision on
+// submit is always made server-side by POST /api/downloads, so a mismatch
+// here (e.g. gallery-dl's site catalog changing) is cosmetic, never wrong.
+const GALLERY_DOMAIN_RE = /pixeldrain\.com|bunkr\.\w+|gofile\.io|filester\.(me|gg)/i;
+const MEDIAFIRE_DOMAIN_RE = /mediafire\.com/i;
+function classifyLinePreview(line) {
+  line = line.trim();
+  if (!line || line.toLowerCase().startsWith("folder:") || line.startsWith("#")) return null;
+  if (MEDIAFIRE_DOMAIN_RE.test(line)) return "mediafire";
+  if (GALLERY_DOMAIN_RE.test(line)) return "gallery";
+  if (/^https?:\/\//i.test(line)) return "none";
+  return null; // bare ID/token -- ambiguous client-side, let the server decide
+}
+function engineChipHtml(engine) {
+  if (engine === "mediafire") return `<span class="engine-chip mediafire">mediafire</span>`;
+  if (engine === "gallery") return `<span class="engine-chip gallery">gallery-dl</span>`;
+  return `<span class="engine-chip none">no soportado</span>`;
+}
+function renderDetectSingle() {
+  const line = els.inputSingle.value.trim();
+  const engine = classifyLinePreview(line);
+  els.detectSingle.innerHTML = engine
+    ? `<div class="detect-row"><span class="u">${escapeAttr(line)}</span>${engineChipHtml(engine)}</div>` : "";
+}
+function renderDetectBatch() {
+  els.detectBatch.innerHTML = els.inputBatch.value.split("\n")
+    .map((raw) => {
+      const engine = classifyLinePreview(raw);
+      return engine ? `<div class="detect-row"><span class="u">${escapeAttr(raw.trim())}</span>${engineChipHtml(engine)}</div>` : "";
+    })
+    .join("");
+}
+els.inputSingle.addEventListener("input", renderDetectSingle);
+els.inputBatch.addEventListener("input", renderDetectBatch);
+
 function openModal(kind) {
   els.formError.textContent = "";
   setModalKind(kind || "auto");
+  renderDetectSingle();
+  renderDetectBatch();
   els.modalBackdrop.classList.add("show");
 }
 function closeModal() {
@@ -377,6 +418,8 @@ els.form.addEventListener("submit", async (e) => {
       els.inputSingle.value = "";
       els.inputBatch.value = "";
       els.holdMode.checked = false;
+      renderDetectSingle();
+      renderDetectBatch();
       closeModal();
     }
     refreshTasks();
@@ -450,19 +493,23 @@ function normalizeYtdlpEntry(job) {
 }
 
 function normalizeGalleryEntry(job) {
-  // Interim shim entry, kept deliberately simple (no batch_id clustering
-  // yet -- each job is its own row, same as yt-dlp's) while the current
-  // task-table UI is still in place; the full rewrite groups gallery-dl
-  // batches by batch_id the way uploads already do.
+  // One row per job -- when a gallery-dl URL is an album/folder, that's
+  // already several files inside a *single* job (items[]), shown expanded
+  // the same way a downloads/extension multi-item job already is. A batch
+  // submission of several independent URLs doesn't cluster into one group
+  // yet (unlike uploads' batch_id grouping) -- each shows as its own row,
+  // same as yt-dlp jobs already do; worth adding later, not load-bearing
+  // for the redesign itself.
   const items = job.items || [];
   const singleName = items.length === 1 ? items[0].filename : null;
   const running = items.find((it) => it.status === "running");
+  const site = job.site || "gallery-dl";
   return {
     uid: `gallery:${job.id}`, id: job.id, apiBase: "/api/gallery/jobs", engineKind: "gallery",
     name: singleName || truncate(job.url, 90),
     sub: items.length > 1 ? `${items.length} archivos` : null,
     msg: job.error || null,
-    sites: ["gallery-dl"], totalBytes: job.total, doneBytes: job.bytes_done,
+    sites: [site], totalBytes: job.total, doneBytes: job.bytes_done,
     speedKbps: running ? running.speed_kb : 0,
     status: job.status,
     cancellable: GALLERY_CANCELLABLE.has(job.status),
@@ -470,7 +517,7 @@ function normalizeGalleryEntry(job) {
     deletable: GALLERY_DELETABLE.has(job.status),
     createdAt: job.created_at,
     children: items.length > 1 ? items.map((it) => ({
-      name: it.filename, site: "gallery-dl",
+      name: it.filename, site,
       totalBytes: it.total, doneBytes: it.bytes_done,
       speedKbps: it.status === "running" ? it.speed_kb : 0,
       status: it.status, msg: null,
@@ -610,19 +657,26 @@ function statusBucket(status) {
 }
 
 function buildSidebarCounts(entries) {
-  const c = { all: entries.length, downloads: 0, video: 0, extension: 0, uploads: 0, held: 0, queued: 0, active: 0, done: 0, error: 0 };
+  const c = { all: entries.length, downloads: 0, gallery: 0, video: 0, extension: 0, uploads: 0, held: 0, queued: 0, active: 0, done: 0, error: 0 };
   const bySite = {};
   for (const e of entries) {
     c[e.engineKind] = (c[e.engineKind] || 0) + 1;
-    if (e.engineKind === "downloads" || e.engineKind === "uploads") {
+    if (e.engineKind === "downloads" || e.engineKind === "gallery" || e.engineKind === "uploads") {
+      // "Descargas" in the sidebar covers 3 engines (site downloads, gallery-dl,
+      // and each of their per-site sub-rows below) -- they all land in the
+      // same /downloads tree, so splitting them into separate top-level nav
+      // items was an implementation detail leaking into the UI, not something
+      // a user would organize by.
+      const bucketKind = e.engineKind === "uploads" ? "uploads" : "downloads";
       for (const site of e.sites) {
-        const key = e.engineKind + ":" + site;
+        const key = bucketKind + ":" + site;
         bySite[key] = (bySite[key] || 0) + 1;
       }
     }
     const bucket = statusBucket(e.status);
     if (bucket) c[bucket]++;
   }
+  c.downloadsAll = c.downloads + c.gallery + c.video + c.extension;
   return { c, bySite };
 }
 
@@ -645,11 +699,11 @@ function buildSidebar(entries) {
   html += `</div>`;
 
   html += `<div class="side-group"><div class="side-heading">Tareas</div>`;
-  html += sideItem("downloads", "Descargas", c.downloads, ICONS.folder);
+  html += sideItem("downloads", "Descargas", c.downloadsAll, ICONS.folder);
   for (const s of downloadSites) html += sideItem("downloads:" + s, siteSwatch(s) + s, bySite["downloads:" + s], "", true);
+  if (c.video) html += sideItem("video", siteSwatch("yt-dlp") + "yt-dlp", c.video, "", true);
+  if (c.extension) html += sideItem("extension", siteSwatch("extensión") + "extensión", c.extension, "", true);
   html += sideItem("st:held", "En espera", c.held, HOLD_ICON);
-  html += sideItem("video", "Video (yt-dlp)", c.video, ICONS.video);
-  html += sideItem("extension", "Extensión", c.extension, ICONS.ext);
   html += sideItem("uploads", "Subidas", c.uploads, ICONS.upload);
   for (const s of uploadSites) html += sideItem("uploads:" + s, siteSwatch(s) + s, bySite["uploads:" + s], "", true);
   html += `</div>`;
@@ -687,8 +741,12 @@ function entryMatches(e) {
   }
   const v = state.view;
   if (v === "all") return true;
-  if (v === "downloads" || v === "video" || v === "extension" || v === "uploads") return e.engineKind === v;
-  if (v.startsWith("downloads:")) return e.engineKind === "downloads" && e.sites.includes(v.slice(10));
+  // "Descargas" is the combined bucket (site downloads + gallery-dl + yt-dlp
+  // + extension -- they all land in /downloads); video/extension/a specific
+  // site are the narrower sub-filters under it.
+  if (v === "downloads") return ["downloads", "gallery", "video", "extension"].includes(e.engineKind);
+  if (v === "video" || v === "extension" || v === "uploads") return e.engineKind === v;
+  if (v.startsWith("downloads:")) return (e.engineKind === "downloads" || e.engineKind === "gallery") && e.sites.includes(v.slice(10));
   if (v.startsWith("uploads:")) return e.engineKind === "uploads" && e.sites.includes(v.slice(8));
   if (v === "st:held") return statusBucket(e.status) === "held";
   if (v === "st:queued") return statusBucket(e.status) === "queued";
