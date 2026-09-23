@@ -227,6 +227,9 @@ const VIDEO_CANCELLABLE = new Set(["queued", "running"]);
 const VIDEO_DELETABLE = new Set(["done", "error", "cancelled"]);
 const EXTENSION_CANCELLABLE = new Set(["queued", "downloading"]);
 const EXTENSION_DELETABLE = new Set(["done", "done_with_errors", "error", "cancelled"]);
+const GALLERY_CANCELLABLE = new Set(["queued", "running", "cancelling"]);
+const GALLERY_RETRYABLE = new Set(["done_with_errors", "error", "cancelled"]);
+const GALLERY_DELETABLE = new Set(["done", "done_with_errors", "error", "cancelled"]);
 
 // Real per-site accent colors -- distinct from the app's own accent hue so
 // they read as "which host" rather than competing with primary/status color.
@@ -359,15 +362,23 @@ els.form.addEventListener("submit", async (e) => {
     hold: els.holdMode.checked,
   };
   try {
-    await fetchJSON("/api/jobs", {
+    // /api/downloads fans each line out to whichever engine actually
+    // supports it (Mediafire vs. the gallery-dl-backed sites) -- see
+    // download_router.py. A line matching neither comes back in
+    // `unsupported` instead of failing the whole submission.
+    const result = await fetchJSON("/api/downloads", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    els.inputSingle.value = "";
-    els.inputBatch.value = "";
-    els.holdMode.checked = false;
-    closeModal();
+    if (result.unsupported && result.unsupported.length) {
+      els.formError.textContent = `Sitio no reconocido: ${result.unsupported.join(", ")}`;
+    } else {
+      els.inputSingle.value = "";
+      els.inputBatch.value = "";
+      els.holdMode.checked = false;
+      closeModal();
+    }
     refreshTasks();
   } catch (err) {
     els.formError.textContent = err.message;
@@ -435,6 +446,36 @@ function normalizeYtdlpEntry(job) {
     cancellable: VIDEO_CANCELLABLE.has(job.status), retryable: false,
     deletable: VIDEO_DELETABLE.has(job.status),
     createdAt: job.created_at, children: null, rawJobs: [job],
+  };
+}
+
+function normalizeGalleryEntry(job) {
+  // Interim shim entry, kept deliberately simple (no batch_id clustering
+  // yet -- each job is its own row, same as yt-dlp's) while the current
+  // task-table UI is still in place; the full rewrite groups gallery-dl
+  // batches by batch_id the way uploads already do.
+  const items = job.items || [];
+  const singleName = items.length === 1 ? items[0].filename : null;
+  const running = items.find((it) => it.status === "running");
+  return {
+    uid: `gallery:${job.id}`, id: job.id, apiBase: "/api/gallery/jobs", engineKind: "gallery",
+    name: singleName || truncate(job.url, 90),
+    sub: items.length > 1 ? `${items.length} archivos` : null,
+    msg: job.error || null,
+    sites: ["gallery-dl"], totalBytes: job.total, doneBytes: job.bytes_done,
+    speedKbps: running ? running.speed_kb : 0,
+    status: job.status,
+    cancellable: GALLERY_CANCELLABLE.has(job.status),
+    retryable: GALLERY_RETRYABLE.has(job.status),
+    deletable: GALLERY_DELETABLE.has(job.status),
+    createdAt: job.created_at,
+    children: items.length > 1 ? items.map((it) => ({
+      name: it.filename, site: "gallery-dl",
+      totalBytes: it.total, doneBytes: it.bytes_done,
+      speedKbps: it.status === "running" ? it.speed_kb : 0,
+      status: it.status, msg: null,
+    })) : null,
+    rawJobs: [job],
   };
 }
 
@@ -540,12 +581,13 @@ function uploadGroupSpeed(jobs) {
 }
 
 async function fetchAllTasks() {
-  const [jobs, videos, exts, uploads] = await Promise.all([
-    fetchJSON("/api/jobs"), fetchJSON("/api/ytdlp/jobs"),
+  const [jobs, galleryJobs, videos, exts, uploads] = await Promise.all([
+    fetchJSON("/api/jobs"), fetchJSON("/api/gallery/jobs"), fetchJSON("/api/ytdlp/jobs"),
     fetchJSON("/api/extension/jobs"), fetchJSON("/api/uploads/jobs"),
   ]);
   const entries = [
     ...jobs.map(normalizeDownloadEntry),
+    ...galleryJobs.map(normalizeGalleryEntry),
     ...videos.map(normalizeYtdlpEntry),
     ...exts.map(normalizeExtensionEntry),
     ...buildUploadEntries(uploads),
@@ -922,6 +964,7 @@ els.btnClear.addEventListener("click", async () => {
   if (!confirm("¿Borrar del historial todo lo ya terminado? No afecta los archivos ya descargados/subidos.")) return;
   await Promise.all([
     fetch("/api/jobs/clear-finished", { method: "POST" }),
+    fetch("/api/gallery/clear-finished", { method: "POST" }),
     fetch("/api/ytdlp/clear-finished", { method: "POST" }),
     fetch("/api/extension/clear-finished", { method: "POST" }),
     fetch("/api/uploads/clear-finished", { method: "POST" }),
