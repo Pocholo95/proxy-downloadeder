@@ -24,6 +24,7 @@ import gallery_dl.extractor
 import gallery_dl.job
 
 from .. import proxy_sources
+from .. import site_prefs
 from ..config import MIN_SPEED_KB
 from . import gallery_downloader
 from . import video_optimize
@@ -33,6 +34,25 @@ INFLIGHT_STATUSES = {"queued", "running", "cancelling"}
 MAX_HISTORY = 200
 MAX_PROXY_ATTEMPTS = 5  # whole-job retries with a fresh proxy on a hard (not just slow) failure
 
+# Carried over from the old SiteProvider.use_proxy_by_default values (same
+# site_prefs.py store, same config/<site>.json files) so "auto" resolves to
+# what each site actually needs instead of one blanket behavior. Bunkr's CDN
+# treats proxied traffic as suspicious and rate-limits/blocks it -- proxy
+# there is actively counterproductive, hence the one False among the four.
+GALLERY_SITE_DEFAULTS = {
+    "pixeldrain": True,
+    "bunkr": False,
+    "gofile": True,
+    "filester": True,
+}
+
+GALLERY_SITE_DOMAINS = {
+    "pixeldrain": ["pixeldrain.com"],
+    "bunkr": ["bunkr.si", "bunkr.sk", "bunkr.ph", "bunkr.cr", "bunkr.is", "bunkr.to"],
+    "gofile": ["gofile.io"],
+    "filester": ["filester.me", "filester.gg"],
+}
+
 
 class GalleryJob:
     def __init__(self, job_id, url, output_dir, proxy_mode, min_speed_kb=None,
@@ -40,7 +60,7 @@ class GalleryJob:
         self.id = job_id
         self.url = url
         self.output_dir = output_dir
-        self.proxy_mode = proxy_mode  # "auto" | "proxy" | "no-proxy" -- "auto" behaves like "no-proxy"
+        self.proxy_mode = proxy_mode  # "auto" | "proxy" | "no-proxy" -- "auto" resolves per-site via site_prefs/GALLERY_SITE_DEFAULTS
         self.min_speed_kb = min_speed_kb or MIN_SPEED_KB
         self.batch_id = batch_id
         self.batch_label = batch_label
@@ -155,9 +175,43 @@ class GalleryJobManager:
         gallery_downloader.install()
         gallery_downloader.install_logging()
 
+        self._ensure_config_files()
         self._load_persisted()
         self._worker = threading.Thread(target=self._worker_loop, daemon=True, name="gallery-worker")
         self._worker.start()
+
+    # ── site config (mirrors jobs.py's JobManager, same config/<site>.json
+    # store, now covering the 4 gallery-dl categories too) ──
+    def _ensure_config_files(self):
+        for name, default in GALLERY_SITE_DEFAULTS.items():
+            site_prefs.sync_config_file(name, default)
+
+    def list_sites(self):
+        out = []
+        for name, default in GALLERY_SITE_DEFAULTS.items():
+            override = site_prefs.get_override(name)
+            effective = default if override is None else override
+            out.append({
+                "name": name,
+                "domains": GALLERY_SITE_DOMAINS.get(name, []),
+                "is_default": False,
+                "default_use_proxy": default,
+                "override": override,
+                "effective_use_proxy": effective,
+            })
+        return out
+
+    def set_site_proxy(self, name, action):
+        if name not in GALLERY_SITE_DEFAULTS:
+            raise ValueError(f"Unknown site: {name}")
+        if action == "enable":
+            site_prefs.set_override(name, True)
+        elif action == "disable":
+            site_prefs.set_override(name, False)
+        elif action == "reset":
+            site_prefs.clear_override(name)
+        else:
+            raise ValueError(f"Unknown action: {action}")
 
     # ── persistence ──
     def _load_persisted(self):
@@ -337,8 +391,16 @@ class GalleryJobManager:
     def _run_job(self, job):
         Path(job.output_dir).mkdir(parents=True, exist_ok=True)
 
+        use_proxy = job.proxy_mode == "proxy"
+        if job.proxy_mode == "auto" and job.site in GALLERY_SITE_DEFAULTS:
+            override = site_prefs.get_override(job.site)
+            default = GALLERY_SITE_DEFAULTS[job.site]
+            use_proxy = default if override is None else override
+            if use_proxy:
+                job.log(f"Proxy activado por preferencia de sitio ({job.site})")
+
         proxy_pool = None
-        if job.proxy_mode == "proxy":
+        if use_proxy:
             proxy_pool, err = proxy_sources.build_pool(str(self.state_dir / "working_proxies.json"))
             if not proxy_pool:
                 with job.lock:

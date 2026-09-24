@@ -20,6 +20,7 @@ from .jobs import JobManager
 from .upload_jobs import UploadManager
 from .ytdlp_jobs import YtdlpManager
 from .extension_jobs import ExtensionJobManager
+from . import gallery_jobs
 from .gallery_jobs import GalleryJobManager
 from . import download_router
 
@@ -42,15 +43,16 @@ def index():
 
 @app.get("/api/sites")
 def api_list_sites():
-    return jsonify(manager.list_sites())
+    return jsonify(manager.list_sites() + gallery_manager.list_sites())
 
 
 @app.post("/api/sites/<name>/proxy")
 def api_set_site_proxy(name):
     data = request.get_json(silent=True) or {}
     action = data.get("action")
+    site_manager = gallery_manager if name in gallery_jobs.GALLERY_SITE_DEFAULTS else manager
     try:
-        manager.set_site_proxy(name, action)
+        site_manager.set_site_proxy(name, action)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     return jsonify({"ok": True})
