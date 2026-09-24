@@ -1,7 +1,9 @@
 """Background gallery-dl job manager -- same shape as ytdlp_jobs.py
 (background worker thread, persisted history in state/) but for the sites
-handled by the gallery-dl library (Pixeldrain, Bunkr, Gofile, Filester)
-instead of this project's own SiteProvider/core/downloader.py path.
+handled by the gallery-dl library (Bunkr, Gofile, Filester) instead of this
+project's own SiteProvider/core/downloader.py path. Pixeldrain moved here
+and then back to the SiteProvider path (see sites/__init__.py) -- gallery-dl's
+Pixeldrain extractor errored out too often in practice.
 
 Proxy rotation is handled by gallery_downloader.RotatingHttpDownloader (mid-
 download, speed-based) plus a coarser whole-job retry-with-a-fresh-proxy
@@ -38,16 +40,17 @@ MAX_PROXY_ATTEMPTS = 5  # whole-job retries with a fresh proxy on a hard (not ju
 # site_prefs.py store, same config/<site>.json files) so "auto" resolves to
 # what each site actually needs instead of one blanket behavior. Bunkr's CDN
 # treats proxied traffic as suspicious and rate-limits/blocks it -- proxy
-# there is actively counterproductive, hence the one False among the four.
+# there is actively counterproductive, hence the one False among the three.
+# Pixeldrain moved back to the original SiteProvider path (see
+# sites/__init__.py) -- its proxy preference lives in JobManager/registry.py
+# now, same site_prefs.py store, not here.
 GALLERY_SITE_DEFAULTS = {
-    "pixeldrain": True,
     "bunkr": False,
     "gofile": True,
     "filester": True,
 }
 
 GALLERY_SITE_DOMAINS = {
-    "pixeldrain": ["pixeldrain.com"],
     "bunkr": ["bunkr.si", "bunkr.sk", "bunkr.ph", "bunkr.cr", "bunkr.is", "bunkr.to"],
     "gofile": ["gofile.io"],
     "filester": ["filester.me", "filester.gg"],
@@ -64,10 +67,10 @@ class GalleryJob:
         self.min_speed_kb = min_speed_kb or MIN_SPEED_KB
         self.batch_id = batch_id
         self.batch_label = batch_label
-        # The real site (pixeldrain/bunkr/gofile/filester), not just
-        # "gallery-dl" -- resolved once via gallery_dl.extractor.find() so
-        # the UI can show the same per-site badge/color it already uses for
-        # everything else instead of one generic label for all four.
+        # The real site (bunkr/gofile/filester), not just "gallery-dl" --
+        # resolved once via gallery_dl.extractor.find() so the UI can show
+        # the same per-site badge/color it already uses for everything else
+        # instead of one generic label for all three.
         self.site = site or "gallery-dl"
         self.status = "queued"  # queued|running|cancelling|done|done_with_errors|error|cancelled
         self.error = None

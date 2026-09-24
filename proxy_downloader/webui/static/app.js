@@ -301,18 +301,24 @@ els.modalTabs.querySelectorAll(".mtab").forEach((tab) => {
 // mirroring the same domains. Preview only: the real routing decision on
 // submit is always made server-side by POST /api/downloads, so a mismatch
 // here (e.g. gallery-dl's site catalog changing) is cosmetic, never wrong.
-const GALLERY_DOMAIN_RE = /pixeldrain\.com|bunkr\.\w+|gofile\.io|filester\.(me|gg)/i;
+// Pixeldrain is back on the provider/JobManager path (not gallery-dl --
+// gallery-dl's Pixeldrain extractor errored out too often), same as
+// Mediafire -- both matched here, distinguished only for the chip's label.
+const GALLERY_DOMAIN_RE = /bunkr\.\w+|gofile\.io|filester\.(me|gg)/i;
 const MEDIAFIRE_DOMAIN_RE = /mediafire\.com/i;
+const PIXELDRAIN_DOMAIN_RE = /pixeldrain\.com/i;
 function classifyLinePreview(line) {
   line = line.trim();
   if (!line || line.toLowerCase().startsWith("folder:") || line.startsWith("#")) return null;
   if (MEDIAFIRE_DOMAIN_RE.test(line)) return "mediafire";
+  if (PIXELDRAIN_DOMAIN_RE.test(line)) return "pixeldrain";
   if (GALLERY_DOMAIN_RE.test(line)) return "gallery";
   if (/^https?:\/\//i.test(line)) return "none";
   return null; // bare ID/token -- ambiguous client-side, let the server decide
 }
 function engineChipHtml(engine) {
   if (engine === "mediafire") return `<span class="engine-chip mediafire">mediafire</span>`;
+  if (engine === "pixeldrain") return `<span class="engine-chip mediafire">pixeldrain</span>`;
   if (engine === "gallery") return `<span class="engine-chip gallery">gallery-dl</span>`;
   return `<span class="engine-chip none">no soportado</span>`;
 }
