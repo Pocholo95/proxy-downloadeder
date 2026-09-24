@@ -5,18 +5,18 @@ needed, so `config/` is discoverable and directly editable — open
 config/mediafire.json and flip "use_proxy" to true/false. Editing by hand and
 using --enable-proxy/--disable-proxy/--reset-proxy end up in the same place.
 
-Only `use_proxy` is a real setting today; the file is a plain dict so more
-keys can be added later (per-site timeout, retry tuning, etc.) without a
-format change. "_site_default_use_proxy" is informational only — it's
-refreshed on every run to show what "null" currently resolves to, and is
-never read back as a setting.
+`use_proxy` and `use_aria2` are the two real settings today; the file is a
+plain dict so more keys can be added later (per-site timeout, retry
+tuning, etc.) without a format change. "_site_default_use_proxy"/
+"_site_default_use_aria2" are informational only — refreshed on every run
+to show what "null" currently resolves to, never read back as a setting.
 """
 import json
 from pathlib import Path
 
 CONFIG_DIR = Path("config")
 
-_DEFAULTS = {"use_proxy": None}
+_DEFAULTS = {"use_proxy": None, "use_aria2": None}
 
 
 def _path(name):
@@ -42,12 +42,17 @@ def _save(name, data):
         pass
 
 
-def sync_config_file(name, site_default_use_proxy):
+def sync_config_file(name, site_default_use_proxy, site_default_use_aria2=None):
     """Create config/<name>.json if missing, and always refresh its
-    "_site_default_use_proxy" info field — without ever touching whatever
-    "use_proxy" the user has set (including null)."""
+    "_site_default_use_proxy"/"_site_default_use_aria2" info fields —
+    without ever touching whatever the user has actually set (including
+    null). site_default_use_aria2=None (the CLI's call site, which has no
+    concept of aria2 at all) leaves that field untouched entirely rather
+    than stamping a misleading default over it."""
     data = _load(name)
     data["_site_default_use_proxy"] = site_default_use_proxy
+    if site_default_use_aria2 is not None:
+        data["_site_default_use_aria2"] = site_default_use_aria2
     _save(name, data)
 
 
@@ -66,6 +71,25 @@ def set_override(name, enabled):
 def clear_override(name):
     data = _load(name)
     data["use_proxy"] = None
+    _save(name, data)
+
+
+def get_aria2_override(name):
+    """Same as get_override(), for use_aria2 (see core/base.py's
+    use_aria2_by_default -- only meaningful on the no-proxy/direct path,
+    aria2 vs. a single plain-requests connection)."""
+    return _load(name).get("use_aria2")
+
+
+def set_aria2_override(name, enabled):
+    data = _load(name)
+    data["use_aria2"] = enabled
+    _save(name, data)
+
+
+def clear_aria2_override(name):
+    data = _load(name)
+    data["use_aria2"] = None
     _save(name, data)
 
 

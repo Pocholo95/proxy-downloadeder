@@ -54,6 +54,17 @@ def api_set_site_proxy(name):
     return jsonify({"ok": True})
 
 
+@app.post("/api/sites/<name>/aria2")
+def api_set_site_aria2(name):
+    data = request.get_json(silent=True) or {}
+    action = data.get("action")
+    try:
+        manager.set_site_aria2(name, action)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"ok": True})
+
+
 @app.get("/api/proxy-sources")
 def api_list_proxy_sources():
     return jsonify(proxy_sources.list_sources())

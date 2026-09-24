@@ -47,6 +47,15 @@ INFLIGHT_STATUSES = {"queued", "resolving", "fetching_proxies", "running", "canc
 MAX_HISTORY = 300
 
 
+def _wants_aria2(provider):
+    """Same override-then-default precedence as _job_uses_proxy(), for
+    use_aria2_by_default -- only meaningful on the no-proxy/direct path
+    (aria2 has no way to hop proxies mid-download, so the proxy-rotation
+    path is always plain `requests` regardless of this)."""
+    override = site_prefs.get_aria2_override(provider.name)
+    return provider.use_aria2_by_default if override is None else override
+
+
 def _strip_ansi(text):
     return _ANSI_RE.sub("", text)
 
@@ -185,13 +194,15 @@ class JobManager:
     # ── site config (mirrors cli.py --list-sites / --enable-proxy) ──
     def _ensure_config_files(self):
         for p in registry.all_providers():
-            site_prefs.sync_config_file(p.name, p.use_proxy_by_default)
+            site_prefs.sync_config_file(p.name, p.use_proxy_by_default, p.use_aria2_by_default)
 
     def list_sites(self):
         out = []
         for p in registry.all_providers():
             override = site_prefs.get_override(p.name)
             effective = p.use_proxy_by_default if override is None else override
+            aria2_override = site_prefs.get_aria2_override(p.name)
+            aria2_effective = p.use_aria2_by_default if aria2_override is None else aria2_override
             out.append({
                 "name": p.name,
                 "domains": p.domains,
@@ -199,6 +210,9 @@ class JobManager:
                 "default_use_proxy": p.use_proxy_by_default,
                 "override": override,
                 "effective_use_proxy": effective,
+                "default_use_aria2": p.use_aria2_by_default,
+                "aria2_override": aria2_override,
+                "effective_use_aria2": aria2_effective,
             })
         return out
 
@@ -212,6 +226,19 @@ class JobManager:
             site_prefs.set_override(name, False)
         elif action == "reset":
             site_prefs.clear_override(name)
+        else:
+            raise ValueError(f"Unknown action: {action}")
+
+    def set_site_aria2(self, name, action):
+        known = {p.name for p in registry.all_providers()}
+        if name not in known:
+            raise ValueError(f"Unknown site: {name}")
+        if action == "enable":
+            site_prefs.set_aria2_override(name, True)
+        elif action == "disable":
+            site_prefs.set_aria2_override(name, False)
+        elif action == "reset":
+            site_prefs.clear_aria2_override(name)
         else:
             raise ValueError(f"Unknown action: {action}")
 
@@ -579,7 +606,7 @@ class JobManager:
                 if wants_proxy:
                     ensure_proxy_pool()
                 use_proxy = proxy_pool is not None and wants_proxy
-                use_aria2 = not use_proxy and not wants_proxy and provider.use_aria2_by_default
+                use_aria2 = not use_proxy and not wants_proxy and _wants_aria2(provider)
                 with job.lock:
                     item["status"] = "running"
                     item["mode"] = "proxy" if wants_proxy else "direct"
@@ -680,7 +707,7 @@ class JobManager:
 
     def _mk_item(self, provider, file_id, hint_name, dest_dir):
         wants_proxy = provider.use_proxy_by_default
-        engine = "requests" if wants_proxy else ("aria2" if provider.use_aria2_by_default else "requests")
+        engine = "requests" if wants_proxy else ("aria2" if _wants_aria2(provider) else "requests")
         item = {
             "provider": provider,
             "site": provider.name,

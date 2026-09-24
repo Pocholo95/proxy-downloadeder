@@ -775,6 +775,11 @@ function rowActionsHtml(entry) {
   if (entry.fileditchCount > 0) links.push(`<button type="button" class="rlink" data-action="copy-fileditch" data-uid="${entry.uid}">FileDitch ×${entry.fileditchCount}</button>`);
 
   const icons = [];
+  // Uploads have no /log endpoint (upload_jobs.py never kept one) -- every
+  // other engine does, so this is the one exclusion rather than an allowlist.
+  if (entry.engineKind !== "uploads") {
+    icons.push(`<button type="button" class="ricon" data-action="view-log" data-uid="${entry.uid}" title="Ver log"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14 3v5h5M6 3h8l5 5v13H6z"/><path d="M9 13h6M9 17h6M9 9h2"/></svg></button>`);
+  }
   if (entry.startable) icons.push(`<button type="button" class="ricon" data-action="start" data-uid="${entry.uid}" title="Iniciar descarga">${PLAY_ICON}</button>`);
   if (entry.needsConfirmIndex != null) {
     icons.push(`<button type="button" class="ricon" data-action="resolve-redownload" data-uid="${entry.uid}" data-item-index="${entry.needsConfirmIndex}" title="Ya se descargó antes pero el archivo no está — descargar de nuevo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 4v5h5M20 20v-5h-5"/><path d="M5.5 9a7 7 0 0 1 12.3-2.5M18.5 15a7 7 0 0 1-12.3 2.5"/></svg></button>`);
@@ -949,6 +954,19 @@ async function deleteEntry(entry) {
   }
   try { await fetchJSON(`${entry.apiBase}/${entry.id}`, { method: "DELETE" }); } catch (err) { alert(err.message); }
 }
+async function viewLogModal(entry) {
+  openFmModal(`Log — ${entry.name}`);
+  els.fmModalBody.innerHTML = `<pre class="log-view">Cargando…</pre>`;
+  els.fmModalFoot.innerHTML = `<div class="tb-spacer"></div><button type="button" class="tbtn ghost big" id="log-close-btn">Cerrar</button>`;
+  document.getElementById("log-close-btn").addEventListener("click", closeFmModal);
+  try {
+    const res = await fetch(`${entry.apiBase}/${entry.id}/log`);
+    const text = await res.text();
+    els.fmModalBody.innerHTML = `<pre class="log-view">${escapeAttr(text) || "(sin actividad registrada)"}</pre>`;
+  } catch (err) {
+    els.fmModalBody.innerHTML = `<p class="error-msg">${err.message}</p>`;
+  }
+}
 
 els.taskBody.addEventListener("click", async (e) => {
   const btn = e.target.closest("button[data-action]");
@@ -960,6 +978,9 @@ els.taskBody.addEventListener("click", async (e) => {
     const entry = _lastEntries.get(btn.dataset.uid);
     const links = entry ? entry.rawJobs.filter((j) => j.site === "fileditch" && j.url).map((j) => j.url) : [];
     copyToClipboard(links.join("\n"), btn);
+  } else if (action === "view-log") {
+    const entry = _lastEntries.get(btn.dataset.uid);
+    if (entry) await viewLogModal(entry);
   } else if (action === "start") {
     const entry = _lastEntries.get(btn.dataset.uid);
     if (!entry) return;
@@ -1141,14 +1162,25 @@ els.refreshFilesBtn.addEventListener("click", () => loadFiles(state.filesPath));
 
 function siteRow(site) {
   const overrideLabel = site.override === null ? "" : site.override ? " (forzado ON)" : " (forzado OFF)";
+  // aria2 only ever applies on the no-proxy/direct path (see
+  // core/base.py's use_aria2_by_default) -- shown regardless of this
+  // site's own proxy default since --no-proxy/a per-job override can put
+  // any site on that path, not just the ones that default to it.
+  const aria2OverrideLabel = site.aria2_override === null ? "" : site.aria2_override ? " (forzado ON)" : " (forzado OFF)";
   return `<tr>
     <td>${site.name}${site.is_default ? " ★" : ""}</td>
     <td class="dim">${site.domains.join(", ")}</td>
     <td>${site.effective_use_proxy ? "✓ proxy" : "directo"}${overrideLabel}</td>
     <td class="actions">
-      <button type="button" class="tbtn ghost" data-site="${site.name}" data-action="enable">ON</button>
-      <button type="button" class="tbtn ghost" data-site="${site.name}" data-action="disable">OFF</button>
-      <button type="button" class="tbtn ghost" data-site="${site.name}" data-action="reset">reset</button>
+      <button type="button" class="tbtn ghost" data-site="${site.name}" data-kind="proxy" data-action="enable">ON</button>
+      <button type="button" class="tbtn ghost" data-site="${site.name}" data-kind="proxy" data-action="disable">OFF</button>
+      <button type="button" class="tbtn ghost" data-site="${site.name}" data-kind="proxy" data-action="reset">reset</button>
+    </td>
+    <td>${site.effective_use_aria2 ? "aria2" : "directo (1 conexión)"}${aria2OverrideLabel}</td>
+    <td class="actions">
+      <button type="button" class="tbtn ghost" data-site="${site.name}" data-kind="aria2" data-action="enable">ON</button>
+      <button type="button" class="tbtn ghost" data-site="${site.name}" data-kind="aria2" data-action="disable">OFF</button>
+      <button type="button" class="tbtn ghost" data-site="${site.name}" data-kind="aria2" data-action="reset">reset</button>
     </td>
   </tr>`;
 }
@@ -1157,12 +1189,13 @@ async function refreshSites() {
   try {
     const sites = await fetchJSON("/api/sites");
     els.sitesList.innerHTML = `<table class="data-table">
-      <thead><tr><th>Sitio</th><th>Dominios</th><th>Estado</th><th></th></tr></thead>
+      <thead><tr><th>Sitio</th><th>Dominios</th><th>Proxy</th><th></th><th>aria2 (sin proxy)</th><th></th></tr></thead>
       <tbody>${sites.map(siteRow).join("")}</tbody>
     </table>`;
     els.sitesList.querySelectorAll("button[data-site]").forEach((btn) => {
       btn.addEventListener("click", async () => {
-        await fetchJSON(`/api/sites/${btn.dataset.site}/proxy`, {
+        const path = btn.dataset.kind === "aria2" ? "aria2" : "proxy";
+        await fetchJSON(`/api/sites/${btn.dataset.site}/${path}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: btn.dataset.action }),
