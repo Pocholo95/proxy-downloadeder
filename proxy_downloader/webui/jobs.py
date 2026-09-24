@@ -37,6 +37,7 @@ from ..core.downloader import download_file, download_direct
 from .. import proxy_sources
 from ..ui import console
 from ..utils import sanitize_filename
+from . import download_history
 from . import video_optimize
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
@@ -411,6 +412,65 @@ class JobManager:
         self._queue.put(src.id)
         return src
 
+    def resolve_item(self, job_id, item_index, action):
+        """Resolves one "needs_confirm" item -- a link _apply_history()
+        recognized as downloaded before, but whose recorded file is gone --
+        with the user's explicit choice: "skip" leaves it as a permanent
+        no-op (never queued), "redownload" rebuilds it fresh via _mk_item()
+        and re-queues the job, same in-place pattern retry_job() uses for a
+        whole job's worth of failed items, just scoped to this one."""
+        job = self.jobs.get(job_id)
+        if not job:
+            raise ValueError("Job not found")
+        if action not in ("skip", "redownload"):
+            raise ValueError("action debe ser skip o redownload")
+
+        with job.lock:
+            if item_index < 0 or item_index >= len(job.items):
+                raise ValueError("Item not found")
+            item = job.items[item_index]
+            if item["status"] != "needs_confirm":
+                raise ValueError("Este ítem no necesita confirmación")
+
+            if action == "skip":
+                item["status"] = "skipped"
+                item["message"] = "Omitido por el usuario"
+                # The job's own worker pass already finished with this item
+                # left at needs_confirm (that's the only way this method
+                # gets called) -- if nothing else in it is still pending,
+                # its terminal status needs recomputing now, since nothing
+                # will run again to do it.
+                if job.status in TERMINAL_STATUSES and not any(
+                        it["status"] == "needs_confirm" for it in job.items):
+                    failed = sum(1 for it in job.items if it["status"] == "failed")
+                    job.status = "done" if failed == 0 else "done_with_errors"
+                self._persist()
+                return job
+
+            # redownload
+            if job.status not in TERMINAL_STATUSES:
+                raise ValueError("Esperá a que termine el trabajo antes de reintentar este ítem")
+            provider = registry.get(item["site"])
+            if not provider:
+                raise ValueError("Sitio no reconocido")
+            fresh = self._mk_item(provider, item["file_id"], item.get("hint_name"), item["dest_dir"])
+            # _apply_history() inside _mk_item() would just flag this exact
+            # same stale record as needs_confirm all over again -- the user
+            # already made that call, force it to actually run this time.
+            fresh["status"] = "queued"
+            fresh["message"] = None
+            job.items[item_index] = fresh
+            job.status = "queued"
+            job.error = None
+            job.finished_at = None
+            job.cancel_event.clear()
+
+        with self._meta_lock:
+            self._preset_items[job.id] = job.items
+        self._persist()
+        self._queue.put(job.id)
+        return job
+
     # ── worker ──
     def _worker_loop(self):
         while True:
@@ -467,7 +527,11 @@ class JobManager:
                                     proxy=(job.proxy_mode == "proxy"))
 
             proxy_pool = None
-            if any(_job_uses_proxy(it["provider"], args) for it in items):
+            # Only items actually about to be downloaded this run matter here
+            # -- a batch that's entirely skipped/needs_confirm (see
+            # _apply_history()) shouldn't pay for a proxy fetch it'll never use.
+            pending = [it for it in items if it["status"] == "queued"]
+            if any(_job_uses_proxy(it["provider"], args) for it in pending):
                 with job.lock:
                     job.status = "fetching_proxies"
                 self._persist()
@@ -482,11 +546,16 @@ class JobManager:
             for item in items:
                 if job.cancel_event.is_set():
                     break
-                if item["status"] == "done":
-                    # An in-place retry_job() only rebuilds the items that
-                    # failed -- whatever already succeeded stays in this
-                    # same list (so the job's own item table still shows
-                    # it), but shouldn't be downloaded a second time.
+                if item["status"] in ("done", "skipped", "needs_confirm"):
+                    # done: an in-place retry_job() only rebuilds the items
+                    # that failed -- whatever already succeeded stays in
+                    # this same list, but shouldn't be downloaded again.
+                    # skipped: _apply_history() already found this exact
+                    # file on disk. needs_confirm: _apply_history() found a
+                    # stale record for a file that's now missing -- left
+                    # for the user to resolve via the item's own actions in
+                    # the UI (see resolve_item()) rather than downloaded or
+                    # skipped automatically either way.
                     continue
                 provider = item["provider"]
                 wants_proxy = _job_uses_proxy(provider, args)
@@ -530,13 +599,19 @@ class JobManager:
                 self._persist()
 
                 if ok and code != "cancelled":
+                    if item.get("path"):
+                        download_history.record(self.state_dir, item["site"], item["file_id"], item["path"])
                     self._maybe_optimize(item)
 
             with job.lock:
                 if job.cancel_event.is_set():
                     job.status = "cancelled"
                 else:
-                    failed = sum(1 for it in job.items if it["status"] == "failed")
+                    # needs_confirm counts as "not actually done" the same
+                    # way failed does -- an item still waiting on the user's
+                    # redownload/omitir choice (see resolve_item()) shouldn't
+                    # make the whole job read as a clean "done".
+                    failed = sum(1 for it in job.items if it["status"] in ("failed", "needs_confirm"))
                     job.status = "done" if failed == 0 else "done_with_errors"
                 job.finished_at = time.time()
             self._persist()
@@ -578,7 +653,7 @@ class JobManager:
 
     def _mk_item(self, provider, file_id, hint_name, dest_dir):
         wants_proxy = provider.use_proxy_by_default
-        return {
+        item = {
             "provider": provider,
             "site": provider.name,
             "file_id": file_id,
@@ -596,6 +671,36 @@ class JobManager:
             "code": None,
             "path": None,
         }
+        self._apply_history(item)
+        return item
+
+    def _apply_history(self, item):
+        """Checks this item's (site, file_id) against download_history --
+        already downloaded and the file is still there: skip it outright
+        (no proxy fetch, no network request, nothing). Already downloaded
+        but the file is gone (moved/deleted since): don't silently
+        re-download OR silently skip -- leave it for the user to decide,
+        via the "needs_confirm" item actions in the UI."""
+        prev_path = download_history.lookup(self.state_dir, item["site"], item["file_id"])
+        if not prev_path:
+            return
+        p = Path(prev_path)
+        try:
+            exists = p.is_file()
+        except OSError:
+            exists = False
+        if exists:
+            item["status"] = "skipped"
+            item["message"] = "Ya descargado antes — omitido"
+            item["path"] = prev_path
+            item["filename"] = p.name
+            try:
+                item["total"] = item["bytes_done"] = p.stat().st_size
+            except OSError:
+                pass
+        else:
+            item["status"] = "needs_confirm"
+            item["message"] = "Se descargó antes pero el archivo ya no está — ¿descargar de nuevo?"
 
     def _build_items(self, job):
         out_dir = Path(job.output_dir)

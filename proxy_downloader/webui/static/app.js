@@ -203,16 +203,28 @@ const STATUS_LABELS = {
   cancelled: "cancelado",
   downloading: "descargando",
   uploading: "subiendo",
+  skipped: "omitido (ya existía)",
+  needs_confirm: "¿descargar de nuevo?",
 };
 
 // Maps a raw status string to one of the 5 visual pill styles. "held" reuses
 // the warn/yellow style -- like done_with_errors and cancelling, it's a
 // state that wants the user's attention/action, not passive progress.
+// The sub-line under a row's name (job error, or a single/child item's own
+// message) reuses one of the pill's own colors instead of defaulting to
+// "error red" for everything -- a "skipped" message is good news, a
+// "needs_confirm" one is a question, neither is actually an error.
+function msgClass(status) {
+  if (status === "skipped") return "";
+  if (status === "needs_confirm" || status === "held") return "warn";
+  return "err";
+}
+
 function statusPillClass(status) {
   if (status === "queued" || status === "cancelled") return "st-queued";
-  if (status === "held") return "st-warn";
+  if (status === "held" || status === "needs_confirm") return "st-warn";
   if (["resolving", "fetching_proxies", "running", "cancelling", "downloading", "uploading"].includes(status)) return "st-active";
-  if (status === "done") return "st-done";
+  if (status === "done" || status === "skipped") return "st-done";
   if (status === "done_with_errors") return "st-warn";
   if (status === "error" || status === "failed") return "st-error";
   return "st-queued";
@@ -461,17 +473,29 @@ function normalizeDownloadEntry(job) {
   const totalBytes = items.reduce((s, it) => s + (it.total || 0), 0);
   const doneBytes = items.reduce((s, it) => s + (it.bytes_done || 0), 0);
   const running = items.find((it) => it.status === "running");
+  // A single-item job has no expand row to show the item's own status/
+  // message in (children stays null below) -- when that one item is
+  // needs_confirm (see download_history.py), surface its actions right on
+  // the parent row instead of burying them behind an expand that won't
+  // exist for this common one-link case.
+  const needsConfirmIndex = items.length === 1 && items[0].status === "needs_confirm" ? 0 : null;
   return {
     uid: `jobs:${job.id}`, id: job.id, apiBase: "/api/jobs", engineKind: "downloads",
-    name: singleName || rawName, sub, msg: job.error || null,
+    name: singleName || rawName, sub,
+    msg: job.error || (items.length === 1 ? items[0].message : null) || null,
+    // Which status colors that msg -- the single item's own when it's the
+    // source of the message, the job's own status otherwise (job.error).
+    msgStatus: (items.length === 1 && !job.error) ? items[0].status : job.status,
     sites, totalBytes, doneBytes, speedKbps: running ? running.speed_kb : 0,
     status: job.status,
     cancellable: CANCELLABLE_STATUSES.has(job.status),
     retryable: RETRYABLE_STATUSES.has(job.status) && hasFailed,
     deletable: DELETABLE_STATUSES.has(job.status),
     startable: job.status === "held",
+    needsConfirmIndex,
     createdAt: job.created_at,
-    children: items.length > 1 ? items.map((it) => ({
+    children: items.length > 1 ? items.map((it, idx) => ({
+      idx, jobId: job.id,
       name: it.filename || it.hint_name || it.file_id, site: it.site,
       totalBytes: it.total, doneBytes: it.bytes_done,
       speedKbps: it.status === "running" ? it.speed_kb : 0,
@@ -746,6 +770,10 @@ function rowActionsHtml(entry) {
 
   const icons = [];
   if (entry.startable) icons.push(`<button type="button" class="ricon" data-action="start" data-uid="${entry.uid}" title="Iniciar descarga">${PLAY_ICON}</button>`);
+  if (entry.needsConfirmIndex != null) {
+    icons.push(`<button type="button" class="ricon" data-action="resolve-redownload" data-uid="${entry.uid}" data-item-index="${entry.needsConfirmIndex}" title="Ya se descargó antes pero el archivo no está — descargar de nuevo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 4v5h5M20 20v-5h-5"/><path d="M5.5 9a7 7 0 0 1 12.3-2.5M18.5 15a7 7 0 0 1-12.3 2.5"/></svg></button>`);
+    icons.push(`<button type="button" class="ricon" data-action="resolve-skip" data-uid="${entry.uid}" data-item-index="${entry.needsConfirmIndex}" title="Omitir — dejarlo como está"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>`);
+  }
   if (entry.cancellable) icons.push(`<button type="button" class="ricon" data-action="cancel" data-uid="${entry.uid}" title="Cancelar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6 6 18"/></svg></button>`);
   if (entry.retryable) icons.push(`<button type="button" class="ricon" data-action="retry" data-uid="${entry.uid}" title="Reintentar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 4v5h5M20 20v-5h-5"/><path d="M5.5 9a7 7 0 0 1 12.3-2.5M18.5 15a7 7 0 0 1-12.3 2.5"/></svg></button>`);
   if (entry.deletable) icons.push(`<button type="button" class="ricon" data-action="delete" data-uid="${entry.uid}" title="Quitar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button>`);
@@ -768,7 +796,7 @@ function rowHtml(entry) {
         ${disclosure}${kindIco}
         <div class="name-col-inner">
           <div class="name-txt" title="${escapeAttr(entry.name)}">${entry.name}</div>
-          ${entry.sub ? `<div class="name-sub">${entry.sub}</div>` : (entry.msg ? `<div class="name-sub err">${entry.msg}</div>` : "")}
+          ${entry.msg ? `<div class="name-sub ${msgClass(entry.msgStatus || entry.status)}">${entry.msg}</div>` : (entry.sub ? `<div class="name-sub">${entry.sub}</div>` : "")}
         </div>
       </div>
     </td>
@@ -795,6 +823,15 @@ function childRowHtml(parent, c, isLast) {
     if (c.status === "error") icons.push(`<button type="button" class="ricon" data-action="retry-job" data-job-id="${c.jobId}" title="Reintentar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 4v5h5M20 20v-5h-5"/><path d="M5.5 9a7 7 0 0 1 12.3-2.5M18.5 15a7 7 0 0 1-12.3 2.5"/></svg></button>`);
     if (c.status === "done" || c.status === "error") icons.push(`<button type="button" class="ricon" data-action="delete-job" data-job-id="${c.jobId}" title="Quitar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button>`);
     actions = `<div class="row-actions">${links.join("")}${icons.join("")}</div>`;
+  } else if (parent.engineKind === "downloads" && c.status === "needs_confirm") {
+    // Same data-action names/attrs the parent row's own needsConfirmIndex
+    // buttons use (see rowActionsHtml) -- one shared click handler covers
+    // both a single-item job's parent row and a multi-item job's child row.
+    const icons = [
+      `<button type="button" class="ricon" data-action="resolve-redownload" data-uid="${parent.uid}" data-item-index="${c.idx}" title="Ya se descargó antes pero el archivo no está — descargar de nuevo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 4v5h5M20 20v-5h-5"/><path d="M5.5 9a7 7 0 0 1 12.3-2.5M18.5 15a7 7 0 0 1-12.3 2.5"/></svg></button>`,
+      `<button type="button" class="ricon" data-action="resolve-skip" data-uid="${parent.uid}" data-item-index="${c.idx}" title="Omitir — dejarlo como está"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>`,
+    ];
+    actions = `<div class="row-actions">${icons.join("")}</div>`;
   }
   const site = c.site ? siteCellHtml([c.site]) : "";
   return `<tr class="child-row${isLast ? " child-last" : ""}${state.expanded.has(parent.uid) ? " open" : ""}" data-parent="${parent.uid}">
@@ -804,7 +841,7 @@ function childRowHtml(parent, c, isLast) {
         ${ICONS.file}
         <div class="name-col-inner">
           <div class="name-txt" title="${escapeAttr(c.name || "")}">${c.name || "—"}${c.dest ? ` <span class="dim">→ ${c.dest}</span>` : ""}</div>
-          ${c.msg ? `<div class="name-sub err">${c.msg}</div>` : ""}
+          ${c.msg ? `<div class="name-sub ${msgClass(c.status)}">${c.msg}</div>` : ""}
         </div>
       </div>
     </td>
@@ -922,6 +959,21 @@ els.taskBody.addEventListener("click", async (e) => {
     if (!entry) return;
     btn.disabled = true;
     await startEntry(entry);
+    refreshTasks();
+  } else if (action === "resolve-redownload" || action === "resolve-skip") {
+    const entry = _lastEntries.get(btn.dataset.uid);
+    if (!entry) return;
+    const resolveAction = action === "resolve-redownload" ? "redownload" : "skip";
+    btn.disabled = true;
+    try {
+      await fetchJSON(`/api/jobs/${entry.id}/items/${btn.dataset.itemIndex}/resolve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: resolveAction }),
+      });
+    } catch (err) {
+      alert(err.message);
+    }
     refreshTasks();
   } else if (action === "cancel") {
     const entry = _lastEntries.get(btn.dataset.uid);

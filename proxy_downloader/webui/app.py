@@ -185,6 +185,19 @@ def api_start_held_job(job_id):
     return jsonify(job.to_dict())
 
 
+@app.post("/api/jobs/<job_id>/items/<int:item_index>/resolve")
+def api_resolve_job_item(job_id, item_index):
+    """Resolves a "needs_confirm" item -- a link download_history.py
+    recognizes as downloaded before, whose file is now missing -- per the
+    user's choice: {"action": "skip"} or {"action": "redownload"}."""
+    data = request.get_json(silent=True) or {}
+    try:
+        job = manager.resolve_item(job_id, item_index, data.get("action"))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify(job.to_dict())
+
+
 @app.delete("/api/jobs/<job_id>")
 def api_delete_job(job_id):
     try:

@@ -236,6 +236,7 @@ input[type="checkbox"]:checked::after {
 .name-txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.6px; }
 .name-sub { font-size: 10.5px; color: var(--faint); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .name-sub.err { color: var(--destructive); }
+.name-sub.warn { color: var(--yellow); }
 
 tr.child-row { display: none; }
 tr.child-row.open { display: table-row; }
