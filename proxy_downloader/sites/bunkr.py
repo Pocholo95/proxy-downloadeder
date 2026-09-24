@@ -21,6 +21,13 @@ since Bunkr doesn't publish an API):
     appended as `?token=...&ex=...` to the CDN URL. That signed link is
     short-lived, so (like Mediafire/FileDitch) it's resolved fresh on every
     download attempt rather than cached.
+  - A pasted batch can also contain links copied straight off a CDN node
+    (`cdn.bunkr.ru`, `cdn3.bunkr.ru`, `cdn4.bunkr.ru`, ...) instead of an
+    item page — e.g. right-click "copy video address" on the page's
+    <video>/<img>, or a "direct link" button some clients expose. These are
+    a different CDN namespace from the `*.cdn.cr` nodes jsCDN/the sign API
+    deal in above, and are already the final link — nothing to scrape or
+    sign, download_url() below just uses them verbatim.
 
 None of this is bypassing real security — same access a browser gets for a
 public link, just automated; no anti-bot/PoW/CAPTCHA was hit in testing.
@@ -43,6 +50,15 @@ USER_AGENT       = "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:136.0) Gecko/2010
 # Captures the whole URL (scheme optional) so download_url can re-fetch the
 # exact same mirror domain the user linked to.
 FILE_URL_RE   = re.compile(r'(?:https?://)?[a-z0-9.-]*bunkr[a-z0-9.-]*\.\w+/(?:f|i|v)/[^\s?#]+', re.I)
+# A raw CDN link (see module docstring) — same bunkr* host, but the path is
+# NOT one of the item-page prefixes above. Checked only after FILE_URL_RE
+# fails to match, so an actual item page never gets mistaken for one of
+# these. download_url() tells the two apart by re-checking this same shape.
+# Unlike FILE_URL_RE, the query string is kept (up to "?...") -- a direct
+# link's token/expiry, when present, lives there and is the whole reason
+# the link works at all, so it can't be stripped the way an item page's
+# irrelevant query params are.
+DIRECT_CDN_RE = re.compile(r'(?:https?://)?[a-z0-9.-]*bunkr[a-z0-9.-]*\.\w+/(?!a/|f/|i/|v/)[^\s#]+', re.I)
 # Domain and album id captured separately: folder_id ends up as "domain:id"
 # (see extract_folder_id) rather than a raw URL, since the engine joins
 # folder_id onto the output path as a subdirectory name — a URL full of "/"
@@ -83,6 +99,9 @@ class BunkrProvider(SiteProvider):
         if not line or line.startswith("#") or not self.owns(line):
             return None
         m = FILE_URL_RE.search(line)
+        if m:
+            return _full_url(m.group(0))
+        m = DIRECT_CDN_RE.search(line)
         return _full_url(m.group(0)) if m else None
 
     def extract_folder_id(self, line):
@@ -128,6 +147,12 @@ class BunkrProvider(SiteProvider):
             return []
 
     def download_url(self, file_id, proxies=None):
+        # A raw CDN link (DIRECT_CDN_RE) IS the download URL already —
+        # nothing to scrape or sign. Only an item page (/f|i|v/) goes
+        # through the fetch-page -> extract -> sign pipeline below.
+        if not re.search(r'/(?:f|i|v)/', urlparse(file_id).path, re.I):
+            return file_id
+
         r = requests.get(file_id, headers=self.request_headers(file_id), proxies=proxies, timeout=TIMEOUT)
         if r.status_code == 404:
             raise FileUnavailable("Archivo no encontrado en Bunkr (borrado o link inválido)")

@@ -667,5 +667,7 @@ class JobManager:
                 fid = provider.extract_file_id(line)
                 if fid:
                     items.append(self._mk_item(provider, fid, None, current_dir))
+                else:
+                    job.log(f"⚠  No se pudo interpretar el link ({provider.name}), se ignora: {line}")
 
         return items
