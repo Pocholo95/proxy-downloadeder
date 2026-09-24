@@ -372,63 +372,63 @@ def download_direct_requests(provider, file_id, output_dir, min_speed_kb=MIN_SPE
                 dl_headers["Range"] = f"bytes={resume_from}-"
 
             r = requests.get(url, headers=dl_headers, stream=True, timeout=TIMEOUT)
-            if r.status_code not in (200, 206):
+            # 416 (Range Not Satisfiable) on a Range continuation is the
+            # clearest possible "nothing left past what we already have"
+            # signal for a resource with no Content-Length -- treat it as
+            # confirmed completion rather than an error (see the total_size
+            # == 0 branch below for why a confirmation round exists at all).
+            range_exhausted = r.status_code == 416 and resume_from > 0
+            if not range_exhausted and r.status_code not in (200, 206):
                 console.print(f"  [red]✗ HTTP {r.status_code}[/red]")
                 stall += 1
                 continue
 
-            # Asked for a Range continuation but got a full 200 back instead
-            # of 206 -- this resource doesn't honor Range at all, so the
-            # response is the *whole* file again, not just what's missing.
-            # Appending it to the existing .part would duplicate content;
-            # start over instead.
-            if resume_from > 0 and r.status_code == 200:
-                console.print("  [yellow]⚠  Server ignored Range — restarting from scratch[/yellow]")
-                resume_from = 0
+            if range_exhausted:
+                console.print("  [dim]↻ Range confirmó que no queda más — completo[/dim]")
+            else:
+                bytes_dl         = resume_from
+                last_check_time  = time.time()
+                last_check_bytes = resume_from
+                last_report_time = 0.0
 
-            bytes_dl         = resume_from
-            last_check_time  = time.time()
-            last_check_bytes = resume_from
-            last_report_time = 0.0
+                report("downloading", filename=fname, bytes_done=bytes_dl, total=total_size, speed_kb=0)
 
-            report("downloading", filename=fname, bytes_done=bytes_dl, total=total_size, speed_kb=0)
+                with Progress(
+                    "[cyan]{task.description}[/cyan]",
+                    BarColumn(),
+                    DownloadColumn(),
+                    TransferSpeedColumn(),
+                    TimeRemainingColumn(),
+                    console=console,
+                ) as bar:
+                    task = bar.add_task(fname[:40], total=total_size, completed=resume_from)
+                    try:
+                        write_mode = "ab" if resume_from > 0 else "wb"
+                        with open(tmp, write_mode) as f:
+                            for chunk in r.iter_content(chunk_size=262144):
+                                if cancel_event is not None and cancel_event.is_set():
+                                    raise Cancelled()
+                                if chunk:
+                                    f.write(chunk)
+                                    bytes_dl += len(chunk)
+                                    bar.advance(task, len(chunk))
 
-            with Progress(
-                "[cyan]{task.description}[/cyan]",
-                BarColumn(),
-                DownloadColumn(),
-                TransferSpeedColumn(),
-                TimeRemainingColumn(),
-                console=console,
-            ) as bar:
-                task = bar.add_task(fname[:40], total=total_size, completed=resume_from)
-                try:
-                    write_mode = "ab" if resume_from > 0 else "wb"
-                    with open(tmp, write_mode) as f:
-                        for chunk in r.iter_content(chunk_size=262144):
-                            if cancel_event is not None and cancel_event.is_set():
-                                raise Cancelled()
-                            if chunk:
-                                f.write(chunk)
-                                bytes_dl += len(chunk)
-                                bar.advance(task, len(chunk))
+                                    now = time.time()
+                                    if now - last_report_time >= 1:
+                                        inst_speed = ((bytes_dl - last_check_bytes) / 1024) / max(now - last_check_time, 0.001)
+                                        report("downloading", filename=fname, bytes_done=bytes_dl,
+                                               total=total_size, speed_kb=inst_speed)
+                                        last_report_time = now
 
-                                now = time.time()
-                                if now - last_report_time >= 1:
-                                    inst_speed = ((bytes_dl - last_check_bytes) / 1024) / max(now - last_check_time, 0.001)
-                                    report("downloading", filename=fname, bytes_done=bytes_dl,
-                                           total=total_size, speed_kb=inst_speed)
-                                    last_report_time = now
-
-                                if now - last_check_time >= 30 and bytes_dl > resume_from:
-                                    speed = ((bytes_dl - last_check_bytes) / 1024) / (now - last_check_time)
-                                    if speed < min_speed_kb:
-                                        raise DownloadError("Speed too low")
-                                    last_check_time  = now
-                                    last_check_bytes = bytes_dl
-                except KeyboardInterrupt:
-                    console.print("  [yellow]⚠  Interrupted — progress saved to .part[/yellow]")
-                    raise
+                                    if now - last_check_time >= 30 and bytes_dl > resume_from:
+                                        speed = ((bytes_dl - last_check_bytes) / 1024) / (now - last_check_time)
+                                        if speed < min_speed_kb:
+                                            raise DownloadError("Speed too low")
+                                        last_check_time  = now
+                                        last_check_bytes = bytes_dl
+                    except KeyboardInterrupt:
+                        console.print("  [yellow]⚠  Interrupted — progress saved to .part[/yellow]")
+                        raise
 
             final = tmp.stat().st_size
             if total_size > 0:
