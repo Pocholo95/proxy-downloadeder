@@ -33,7 +33,7 @@ from .. import site_prefs
 from ..cli import _resolve_folder_jobs, _job_uses_proxy, FOLDER_LABEL_RE
 from ..config import MIN_SPEED_KB
 from ..core import registry
-from ..core.downloader import download_file, download_direct
+from ..core.downloader import download_file, download_direct, download_direct_requests
 from .. import proxy_sources
 from ..ui import console
 from ..utils import sanitize_filename
@@ -526,24 +526,41 @@ class JobManager:
             args = SimpleNamespace(no_proxy=(job.proxy_mode == "no-proxy"),
                                     proxy=(job.proxy_mode == "proxy"))
 
+            with job.lock:
+                job.status = "running"
+            self._persist()
+
+            # Fetched at most once per job, lazily -- only the first time an
+            # item that actually wants a proxy comes up, not eagerly for the
+            # whole job. A big public proxy list takes a while to fetch and
+            # validate; a batch that mixes a direct site (Bunkr) with a
+            # proxy-by-default one (Pixeldrain/Gofile/Filester) shouldn't
+            # make the direct one sit through that wait it never needed.
             proxy_pool = None
-            # Only items actually about to be downloaded this run matter here
-            # -- a batch that's entirely skipped/needs_confirm (see
-            # _apply_history()) shouldn't pay for a proxy fetch it'll never use.
-            pending = [it for it in items if it["status"] == "queued"]
-            if any(_job_uses_proxy(it["provider"], args) for it in pending):
+            proxy_pool_fetched = False
+
+            def ensure_proxy_pool():
+                nonlocal proxy_pool, proxy_pool_fetched
+                if proxy_pool_fetched:
+                    return
+                proxy_pool_fetched = True
                 with job.lock:
                     job.status = "fetching_proxies"
                 self._persist()
                 proxy_pool, error = proxy_sources.build_pool(str(self.state_dir / "working_proxies.json"))
                 if error:
                     job.log(error)
+                with job.lock:
+                    job.status = "running"
+                self._persist()
 
-            with job.lock:
-                job.status = "running"
-            self._persist()
+            # Direct items process first within this same run (stable sort:
+            # relative order among items that agree on wants_proxy is kept)
+            # so they're never stuck waiting behind a proxy fetch/validation
+            # a *different* item in the same job triggers.
+            ordered_items = sorted(items, key=lambda it: _job_uses_proxy(it["provider"], args))
 
-            for item in items:
+            for item in ordered_items:
                 if job.cancel_event.is_set():
                     break
                 if item["status"] in ("done", "skipped", "needs_confirm"):
@@ -559,14 +576,20 @@ class JobManager:
                     continue
                 provider = item["provider"]
                 wants_proxy = _job_uses_proxy(provider, args)
+                if wants_proxy:
+                    ensure_proxy_pool()
                 use_proxy = proxy_pool is not None and wants_proxy
+                use_aria2 = not use_proxy and not wants_proxy and provider.use_aria2_by_default
                 with job.lock:
                     item["status"] = "running"
                     item["mode"] = "proxy" if wants_proxy else "direct"
                     # aria2 has no way to hop proxies mid-download, so the
                     # proxy-rotation path stays on plain `requests` (see
-                    # core/downloader.py); only the no-proxy path gets aria2.
-                    item["engine"] = "requests" if use_proxy else "aria2"
+                    # core/downloader.py); the no-proxy path gets aria2
+                    # unless the site opted out (use_aria2_by_default=False,
+                    # e.g. Bunkr -- see sites/bunkr.py), in which case it's
+                    # also plain `requests`, just single-connection/no-pool.
+                    item["engine"] = "aria2" if use_aria2 else "requests"
                 self._persist()
 
                 cb = self._make_progress_cb(job, item)
@@ -580,10 +603,14 @@ class JobManager:
                     ok, code = False, None
                     with job.lock:
                         item["message"] = "No proxies available"
-                else:
+                elif use_aria2:
                     ok, code = download_direct(provider, item["file_id"], item["dest_dir"],
                                                 item["hint_name"], progress_cb=cb,
                                                 cancel_event=job.cancel_event)
+                else:
+                    ok, code = download_direct_requests(provider, item["file_id"], item["dest_dir"],
+                                                          job.speed, item["hint_name"], progress_cb=cb,
+                                                          cancel_event=job.cancel_event)
 
                 with job.lock:
                     if code == "cancelled":
@@ -653,6 +680,7 @@ class JobManager:
 
     def _mk_item(self, provider, file_id, hint_name, dest_dir):
         wants_proxy = provider.use_proxy_by_default
+        engine = "requests" if wants_proxy else ("aria2" if provider.use_aria2_by_default else "requests")
         item = {
             "provider": provider,
             "site": provider.name,
@@ -662,7 +690,7 @@ class JobManager:
             "dest_dir": str(dest_dir),
             "status": "queued",
             "mode": "proxy" if wants_proxy else "direct",
-            "engine": "requests" if wants_proxy else "aria2",
+            "engine": engine,
             "phase": None,
             "bytes_done": 0,
             "total": 0,

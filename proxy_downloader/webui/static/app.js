@@ -479,9 +479,15 @@ function normalizeDownloadEntry(job) {
   // the parent row instead of burying them behind an expand that won't
   // exist for this common one-link case.
   const needsConfirmIndex = items.length === 1 && items[0].status === "needs_confirm" ? 0 : null;
+  // The exact link/ID the user originally pasted for this job -- always
+  // one coherent link/ID for anything but a genuine multi-line batch (a
+  // single line submitted via the Batch tab still counts), so it's a
+  // reliable "get the link back" regardless of site or how the job
+  // resolved (a whole album/folder's own link included).
+  const singleUrl = !job.input.includes("\n") ? job.input.trim() : null;
   return {
     uid: `jobs:${job.id}`, id: job.id, apiBase: "/api/jobs", engineKind: "downloads",
-    name: singleName || rawName, sub,
+    name: singleName || rawName, sub, singleUrl,
     msg: job.error || (items.length === 1 ? items[0].message : null) || null,
     // Which status colors that msg -- the single item's own when it's the
     // source of the message, the job's own status otherwise (job.error).

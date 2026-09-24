@@ -19,7 +19,7 @@ from . import site_prefs
 from . import proxy_sources
 from .config import MIN_SPEED_KB, MAX_CHECK_THREADS, CACHE_FILE
 from .core import registry
-from .core.downloader import download_file, download_direct
+from .core.downloader import download_file, download_direct, download_direct_requests
 from .ui import console
 from .utils import sanitize_filename, comment_batch_line
 
@@ -318,8 +318,10 @@ def main():
 
         if use_proxy:
             ok, code = download_file(provider, fid, proxy_pool, dest_dir, args.speed, hint)
-        else:
+        elif provider.use_aria2_by_default:
             ok, code = download_direct(provider, fid, dest_dir, hint)
+        else:
+            ok, code = download_direct_requests(provider, fid, dest_dir, args.speed, hint)
 
         if ok:
             success += 1

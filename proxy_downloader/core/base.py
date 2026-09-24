@@ -44,6 +44,17 @@ class SiteProvider(ABC):
     #: still forces it on, --no-proxy still forces it off for everyone.
     use_proxy_by_default = True
 
+    #: Only meaningful when use_proxy_by_default is False (the direct/no-
+    #: proxy path is the only one that has a choice of engine at all --
+    #: the proxy-rotation path is always plain `requests`, aria2 has no way
+    #: to hop proxies mid-download). aria2's multi-connection splitting is
+    #: the better default (faster, real resume) for a CDN that tolerates
+    #: several simultaneous connections on the same link; a site whose
+    #: signed/short-lived link doesn't (e.g. Bunkr) should set this False to
+    #: get core/downloader.py's single-connection download_direct_requests()
+    #: instead.
+    use_aria2_by_default = True
+
     def owns(self, line):
         """Return True if this provider recognizes the given line (URL or ID).
 

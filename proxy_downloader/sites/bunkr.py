@@ -87,6 +87,16 @@ class BunkrProvider(SiteProvider):
     # reasoning as Mediafire.
     use_proxy_by_default = False
 
+    # aria2's --split opens several simultaneous connections against the
+    # same signed link -- suspected (not conclusively proven, no real file
+    # to test end-to-end against) of being why Bunkr downloads kept failing
+    # even off the gallery-dl engine: a token this specific about being
+    # short-lived/re-resolved-per-attempt (see module docstring) plausibly
+    # doesn't tolerate more than one connection using it at once. Single
+    # connection is the safer default here; can revisit if it turns out
+    # not to be the actual cause.
+    use_aria2_by_default = False
+
     def owns(self, line):
         low = line.strip().lower()
         netloc = urlparse(low if "://" in low else f"//{low}").netloc
