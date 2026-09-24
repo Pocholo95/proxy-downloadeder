@@ -24,6 +24,7 @@ const els = {
   // topbar
   btnAdd: document.getElementById("btn-add"),
   btnCancelActive: document.getElementById("btn-cancel-active"),
+  btnRetryFailed: document.getElementById("btn-retry-failed"),
   btnClear: document.getElementById("btn-clear"),
   searchInput: document.getElementById("search-input"),
   // shell
@@ -229,9 +230,6 @@ const VIDEO_CANCELLABLE = new Set(["queued", "running"]);
 const VIDEO_DELETABLE = new Set(["done", "error", "cancelled"]);
 const EXTENSION_CANCELLABLE = new Set(["queued", "downloading"]);
 const EXTENSION_DELETABLE = new Set(["done", "done_with_errors", "error", "cancelled"]);
-const GALLERY_CANCELLABLE = new Set(["queued", "running", "cancelling"]);
-const GALLERY_RETRYABLE = new Set(["done_with_errors", "error", "cancelled"]);
-const GALLERY_DELETABLE = new Set(["done", "done_with_errors", "error", "cancelled"]);
 
 // Real per-site accent colors -- distinct from the app's own accent hue so
 // they read as "which host" rather than competing with primary/status color.
@@ -296,31 +294,30 @@ els.modalTabs.querySelectorAll(".mtab").forEach((tab) => {
   tab.addEventListener("click", () => setModalKind(tab.dataset.kind));
 });
 
-// Live preview of which engine each pasted line will actually go to --
-// a client-side approximation of download_router.py's classify_line(),
+// Live preview of which site each pasted line will actually go to -- a
+// client-side approximation of download_router.py's classify_line(),
 // mirroring the same domains. Preview only: the real routing decision on
 // submit is always made server-side by POST /api/downloads, so a mismatch
-// here (e.g. gallery-dl's site catalog changing) is cosmetic, never wrong.
-// Pixeldrain is back on the provider/JobManager path (not gallery-dl --
-// gallery-dl's Pixeldrain extractor errored out too often), same as
-// Mediafire -- both matched here, distinguished only for the chip's label.
-const GALLERY_DOMAIN_RE = /bunkr\.\w+|gofile\.io|filester\.(me|gg)/i;
-const MEDIAFIRE_DOMAIN_RE = /mediafire\.com/i;
-const PIXELDRAIN_DOMAIN_RE = /pixeldrain\.com/i;
+// here is cosmetic, never wrong. Every supported site goes through the same
+// SiteProvider/JobManager engine now (see sites/__init__.py) -- the chip
+// just names which site, there's no separate engine to distinguish anymore.
+const SITE_DOMAIN_RES = [
+  ["mediafire", /mediafire\.com/i],
+  ["pixeldrain", /pixeldrain\.com/i],
+  ["bunkr", /bunkr\.\w+/i],
+  ["gofile", /gofile\.io/i],
+  ["filester", /filester\.(me|gg)/i],
+];
 function classifyLinePreview(line) {
   line = line.trim();
   if (!line || line.toLowerCase().startsWith("folder:") || line.startsWith("#")) return null;
-  if (MEDIAFIRE_DOMAIN_RE.test(line)) return "mediafire";
-  if (PIXELDRAIN_DOMAIN_RE.test(line)) return "pixeldrain";
-  if (GALLERY_DOMAIN_RE.test(line)) return "gallery";
+  for (const [site, re] of SITE_DOMAIN_RES) if (re.test(line)) return site;
   if (/^https?:\/\//i.test(line)) return "none";
   return null; // bare ID/token -- ambiguous client-side, let the server decide
 }
 function engineChipHtml(engine) {
-  if (engine === "mediafire") return `<span class="engine-chip mediafire">mediafire</span>`;
-  if (engine === "pixeldrain") return `<span class="engine-chip mediafire">pixeldrain</span>`;
-  if (engine === "gallery") return `<span class="engine-chip gallery">gallery-dl</span>`;
-  return `<span class="engine-chip none">no soportado</span>`;
+  if (engine === "none") return `<span class="engine-chip none">no soportado</span>`;
+  return `<span class="engine-chip mediafire">${engine}</span>`;
 }
 function renderDetectSingle() {
   const line = els.inputSingle.value.trim();
@@ -409,10 +406,10 @@ els.form.addEventListener("submit", async (e) => {
     hold: els.holdMode.checked,
   };
   try {
-    // /api/downloads fans each line out to whichever engine actually
-    // supports it (Mediafire vs. the gallery-dl-backed sites) -- see
-    // download_router.py. A line matching neither comes back in
-    // `unsupported` instead of failing the whole submission.
+    // /api/downloads parses a single URL/ID or a multi-line batch (same
+    // "folder: name" grouping syntax as before) -- see download_router.py.
+    // A line matching no known site comes back in `unsupported` instead of
+    // failing the whole submission.
     const result = await fetchJSON("/api/downloads", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -495,40 +492,6 @@ function normalizeYtdlpEntry(job) {
     cancellable: VIDEO_CANCELLABLE.has(job.status), retryable: false,
     deletable: VIDEO_DELETABLE.has(job.status),
     createdAt: job.created_at, children: null, rawJobs: [job],
-  };
-}
-
-function normalizeGalleryEntry(job) {
-  // One row per job -- when a gallery-dl URL is an album/folder, that's
-  // already several files inside a *single* job (items[]), shown expanded
-  // the same way a downloads/extension multi-item job already is. A batch
-  // submission of several independent URLs doesn't cluster into one group
-  // yet (unlike uploads' batch_id grouping) -- each shows as its own row,
-  // same as yt-dlp jobs already do; worth adding later, not load-bearing
-  // for the redesign itself.
-  const items = job.items || [];
-  const singleName = items.length === 1 ? items[0].filename : null;
-  const running = items.find((it) => it.status === "running");
-  const site = job.site || "gallery-dl";
-  return {
-    uid: `gallery:${job.id}`, id: job.id, apiBase: "/api/gallery/jobs", engineKind: "gallery",
-    name: singleName || truncate(job.url, 90),
-    sub: items.length > 1 ? `${items.length} archivos` : null,
-    msg: job.error || null,
-    sites: [site], totalBytes: job.total, doneBytes: job.bytes_done,
-    speedKbps: running ? running.speed_kb : 0,
-    status: job.status,
-    cancellable: GALLERY_CANCELLABLE.has(job.status),
-    retryable: GALLERY_RETRYABLE.has(job.status),
-    deletable: GALLERY_DELETABLE.has(job.status),
-    createdAt: job.created_at,
-    children: items.length > 1 ? items.map((it) => ({
-      name: it.filename, site,
-      totalBytes: it.total, doneBytes: it.bytes_done,
-      speedKbps: it.status === "running" ? it.speed_kb : 0,
-      status: it.status, msg: null,
-    })) : null,
-    rawJobs: [job],
   };
 }
 
@@ -634,13 +597,12 @@ function uploadGroupSpeed(jobs) {
 }
 
 async function fetchAllTasks() {
-  const [jobs, galleryJobs, videos, exts, uploads] = await Promise.all([
-    fetchJSON("/api/jobs"), fetchJSON("/api/gallery/jobs"), fetchJSON("/api/ytdlp/jobs"),
+  const [jobs, videos, exts, uploads] = await Promise.all([
+    fetchJSON("/api/jobs"), fetchJSON("/api/ytdlp/jobs"),
     fetchJSON("/api/extension/jobs"), fetchJSON("/api/uploads/jobs"),
   ]);
   const entries = [
     ...jobs.map(normalizeDownloadEntry),
-    ...galleryJobs.map(normalizeGalleryEntry),
     ...videos.map(normalizeYtdlpEntry),
     ...exts.map(normalizeExtensionEntry),
     ...buildUploadEntries(uploads),
@@ -663,16 +625,15 @@ function statusBucket(status) {
 }
 
 function buildSidebarCounts(entries) {
-  const c = { all: entries.length, downloads: 0, gallery: 0, video: 0, extension: 0, uploads: 0, held: 0, queued: 0, active: 0, done: 0, error: 0 };
+  const c = { all: entries.length, downloads: 0, video: 0, extension: 0, uploads: 0, held: 0, queued: 0, active: 0, done: 0, error: 0 };
   const bySite = {};
   for (const e of entries) {
     c[e.engineKind] = (c[e.engineKind] || 0) + 1;
-    if (e.engineKind === "downloads" || e.engineKind === "gallery" || e.engineKind === "uploads") {
-      // "Descargas" in the sidebar covers 3 engines (site downloads, gallery-dl,
-      // and each of their per-site sub-rows below) -- they all land in the
-      // same /downloads tree, so splitting them into separate top-level nav
-      // items was an implementation detail leaking into the UI, not something
-      // a user would organize by.
+    if (e.engineKind === "downloads" || e.engineKind === "uploads") {
+      // "Descargas" in the sidebar covers site downloads plus yt-dlp/extension
+      // sub-rows below -- they all land in the same /downloads tree, so
+      // splitting them into separate top-level nav items was an implementation
+      // detail leaking into the UI, not something a user would organize by.
       const bucketKind = e.engineKind === "uploads" ? "uploads" : "downloads";
       for (const site of e.sites) {
         const key = bucketKind + ":" + site;
@@ -682,7 +643,7 @@ function buildSidebarCounts(entries) {
     const bucket = statusBucket(e.status);
     if (bucket) c[bucket]++;
   }
-  c.downloadsAll = c.downloads + c.gallery + c.video + c.extension;
+  c.downloadsAll = c.downloads + c.video + c.extension;
   return { c, bySite };
 }
 
@@ -747,12 +708,12 @@ function entryMatches(e) {
   }
   const v = state.view;
   if (v === "all") return true;
-  // "Descargas" is the combined bucket (site downloads + gallery-dl + yt-dlp
-  // + extension -- they all land in /downloads); video/extension/a specific
-  // site are the narrower sub-filters under it.
-  if (v === "downloads") return ["downloads", "gallery", "video", "extension"].includes(e.engineKind);
+  // "Descargas" is the combined bucket (site downloads + yt-dlp + extension
+  // -- they all land in /downloads); video/extension/a specific site are the
+  // narrower sub-filters under it.
+  if (v === "downloads") return ["downloads", "video", "extension"].includes(e.engineKind);
   if (v === "video" || v === "extension" || v === "uploads") return e.engineKind === v;
-  if (v.startsWith("downloads:")) return (e.engineKind === "downloads" || e.engineKind === "gallery") && e.sites.includes(v.slice(10));
+  if (v.startsWith("downloads:")) return e.engineKind === "downloads" && e.sites.includes(v.slice(10));
   if (v.startsWith("uploads:")) return e.engineKind === "uploads" && e.sites.includes(v.slice(8));
   if (v === "st:held") return statusBucket(e.status) === "held";
   if (v === "st:queued") return statusBucket(e.status) === "queued";
@@ -1024,11 +985,18 @@ els.btnCancelActive.addEventListener("click", async () => {
   refreshTasks();
 });
 
+els.btnRetryFailed.addEventListener("click", async () => {
+  const targets = [..._lastEntries.values()].filter((e) => e.retryable);
+  if (!targets.length) return;
+  if (!confirm(`¿Reintentar ${targets.length} tarea(s) con error?`)) return;
+  await Promise.all(targets.map(retryEntry));
+  refreshTasks();
+});
+
 els.btnClear.addEventListener("click", async () => {
   if (!confirm("¿Borrar del historial todo lo ya terminado? No afecta los archivos ya descargados/subidos.")) return;
   await Promise.all([
     fetch("/api/jobs/clear-finished", { method: "POST" }),
-    fetch("/api/gallery/clear-finished", { method: "POST" }),
     fetch("/api/ytdlp/clear-finished", { method: "POST" }),
     fetch("/api/extension/clear-finished", { method: "POST" }),
     fetch("/api/uploads/clear-finished", { method: "POST" }),

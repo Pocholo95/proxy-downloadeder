@@ -20,8 +20,6 @@ from .jobs import JobManager
 from .upload_jobs import UploadManager
 from .ytdlp_jobs import YtdlpManager
 from .extension_jobs import ExtensionJobManager
-from . import gallery_jobs
-from .gallery_jobs import GalleryJobManager
 from . import download_router
 
 OUTPUT_DIR = os.environ.get("DOWNLOAD_DIR", "/downloads")
@@ -33,7 +31,6 @@ manager = JobManager(base_output_dir=OUTPUT_DIR, state_dir=STATE_DIR)
 upload_manager = UploadManager(state_dir=STATE_DIR, tmp_dir=UPLOAD_TMP_DIR)
 ytdlp_manager = YtdlpManager(base_output_dir=OUTPUT_DIR, state_dir=STATE_DIR)
 extension_manager = ExtensionJobManager(base_output_dir=OUTPUT_DIR, state_dir=STATE_DIR)
-gallery_manager = GalleryJobManager(base_output_dir=OUTPUT_DIR, state_dir=STATE_DIR)
 
 
 @app.get("/")
@@ -43,16 +40,15 @@ def index():
 
 @app.get("/api/sites")
 def api_list_sites():
-    return jsonify(manager.list_sites() + gallery_manager.list_sites())
+    return jsonify(manager.list_sites())
 
 
 @app.post("/api/sites/<name>/proxy")
 def api_set_site_proxy(name):
     data = request.get_json(silent=True) or {}
     action = data.get("action")
-    site_manager = gallery_manager if name in gallery_jobs.GALLERY_SITE_DEFAULTS else manager
     try:
-        site_manager.set_site_proxy(name, action)
+        manager.set_site_proxy(name, action)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     return jsonify({"ok": True})
@@ -126,12 +122,9 @@ def api_create_job():
 @app.post("/api/downloads")
 def api_create_download():
     """Single entry point for the 'Agregar' UI: takes the same shape as
-    POST /api/jobs (kind/value/output_dir/proxy_mode/speed/hold) but routes
-    each line in `value` to whichever engine actually supports it --
-    Mediafire stays on JobManager (the original SiteProvider path), the
-    four gallery-dl-backed sites go to GalleryJobManager, anything else
-    comes back in "unsupported" instead of silently failing. See
-    download_router.py for the classification rules."""
+    POST /api/jobs (kind/value/output_dir/proxy_mode/speed/hold), but a
+    line matching no registered SiteProvider comes back in "unsupported"
+    instead of failing the whole submission. See download_router.py."""
     data = request.get_json(silent=True) or {}
     value = data.get("value", "")
     kind = data.get("kind")
@@ -141,11 +134,10 @@ def api_create_download():
     hold = bool(data.get("hold"))
     try:
         speed = int(speed) if speed not in (None, "") else None
-        result = download_router.route_and_create(value, kind, output_dir, proxy_mode, speed, hold,
-                                                    manager, gallery_manager)
+        result = download_router.route_and_create(value, kind, output_dir, proxy_mode, speed, hold, manager)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
-    if not result["jobs"] and not result["gallery_jobs"]:
+    if not result["jobs"]:
         msg = "Ningún sitio reconocido" if result["unsupported"] else "Falta la URL/ID"
         return jsonify({"error": msg, **result}), 400
     return jsonify(result), 201
@@ -673,86 +665,6 @@ def api_delete_ytdlp_job(job_id):
 @app.post("/api/ytdlp/clear-finished")
 def api_clear_finished_ytdlp():
     removed = ytdlp_manager.clear_finished()
-    return jsonify({"ok": True, "removed": removed})
-
-
-@app.get("/api/gallery/jobs")
-def api_list_gallery_jobs():
-    return jsonify([j.to_dict() for j in gallery_manager.list_jobs()])
-
-
-@app.post("/api/gallery/jobs")
-def api_create_gallery_job():
-    """Takes either {url} (single) or {urls: [...], batch_label?} (batch) --
-    the one shape difference from /api/ytdlp/jobs, which only ever takes a
-    single url. See gallery_jobs.py's create_batch() for why a batch is N
-    independent jobs sharing one batch_id rather than one job with an
-    items[] list."""
-    data = request.get_json(silent=True) or {}
-    output_dir = data.get("output_dir") or None
-    proxy_mode = data.get("proxy_mode", "auto")
-    speed = data.get("speed")
-    try:
-        speed = int(speed) if speed not in (None, "") else None
-        urls = data.get("urls")
-        if urls:
-            jobs = gallery_manager.create_batch(urls, output_dir=output_dir, proxy_mode=proxy_mode,
-                                                 speed=speed, batch_label=data.get("batch_label"))
-            return jsonify({"jobs": [j.to_dict() for j in jobs]}), 201
-        job = gallery_manager.create_job(data.get("url", ""), output_dir=output_dir,
-                                          proxy_mode=proxy_mode, speed=speed)
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-    return jsonify(job.to_dict()), 201
-
-
-@app.get("/api/gallery/jobs/<job_id>")
-def api_get_gallery_job(job_id):
-    job = gallery_manager.get(job_id)
-    if not job:
-        return jsonify({"error": "not found"}), 404
-    return jsonify(job.to_dict())
-
-
-@app.get("/api/gallery/jobs/<job_id>/log")
-def api_get_gallery_job_log(job_id):
-    job = gallery_manager.get(job_id)
-    if not job:
-        return jsonify({"error": "not found"}), 404
-    return job.log_text(), 200, {"Content-Type": "text/plain; charset=utf-8"}
-
-
-@app.post("/api/gallery/jobs/<job_id>/cancel")
-def api_cancel_gallery_job(job_id):
-    ok = gallery_manager.cancel(job_id)
-    if not ok:
-        return jsonify({"error": "job not cancellable (already finished, or not found)"}), 409
-    return jsonify({"ok": True})
-
-
-@app.post("/api/gallery/jobs/<job_id>/retry")
-def api_retry_gallery_job(job_id):
-    try:
-        job = gallery_manager.retry_job(job_id)
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-    return jsonify(job.to_dict()), 201
-
-
-@app.delete("/api/gallery/jobs/<job_id>")
-def api_delete_gallery_job(job_id):
-    try:
-        ok = gallery_manager.delete_job(job_id)
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 409
-    if not ok:
-        return jsonify({"error": "not found"}), 404
-    return jsonify({"ok": True})
-
-
-@app.post("/api/gallery/clear-finished")
-def api_clear_finished_gallery():
-    removed = gallery_manager.clear_finished()
     return jsonify({"ok": True, "removed": removed})
 
 

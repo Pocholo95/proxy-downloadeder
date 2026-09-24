@@ -378,7 +378,6 @@ select { width: 100%; }
 .detect-row .u { font-family: var(--font-mono); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted-foreground); }
 .engine-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 600; padding: 2px 7px; border-radius: 999px; flex-shrink: 0; white-space: nowrap; }
 .engine-chip.mediafire { background: var(--yellow-dim); color: var(--yellow); }
-.engine-chip.gallery { background: var(--primary-dim); color: var(--accent); }
 .engine-chip.none { background: var(--red-dim); color: var(--destructive); }
 
 .upload-site-checks { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
