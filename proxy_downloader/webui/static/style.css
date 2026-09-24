@@ -418,7 +418,16 @@ select { width: 100%; }
 .modal-tabs { display: flex; gap: 2px; margin: 20px 20px 0; padding: 3px; background: var(--secondary); border: 1px solid var(--border); border-radius: 8px; }
 .mtab { flex: 1; padding: 7px; font-size: 12px; font-weight: 500; color: var(--muted-foreground); background: transparent; border: none; border-radius: 6px; cursor: pointer; }
 .mtab.active { color: var(--foreground); background: var(--card); box-shadow: var(--shadow-sm); }
-.modal-body { padding: 20px; overflow-y: auto; flex: 1; }
+/* #job-form wraps modal-body+modal-foot (the fm-modal doesn't use a form,
+   so its body/foot are direct .modal children and don't need this) -- a
+   plain <form> is display:block by default, so without making it a flex
+   column too, modal-body's own flex:1/overflow-y:auto have no effect (flex
+   only applies to flex items of a flex container) and it just grows to fit
+   all content instead of scrolling. A long batch (many pasted links, each
+   adding a detect-row) then pushes modal-foot's Cancelar/Descargar buttons
+   past .modal's own fixed height, clipped away by its overflow:hidden. */
+#job-form { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.modal-body { padding: 20px; overflow-y: auto; flex: 1; min-height: 0; }
 .modal-foot { display: flex; align-items: center; gap: 10px; padding: 16px 20px; border-top: 1px solid var(--border); }
 
 /* ── Preview modal (video/audio/image) ────────────────────────────── */
