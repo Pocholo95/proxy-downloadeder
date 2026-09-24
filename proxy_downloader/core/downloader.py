@@ -189,9 +189,17 @@ def download_file(provider, file_id, proxy_pool, output_dir, min_speed_kb=MIN_SP
                     raise
 
             final = tmp.stat().st_size
-            if total_size == 0:
-                raise DownloadError("Server sent no Content-Length — cannot verify completeness, keeping .part")
-            if final != total_size:
+            # total_size == 0: the server never sent Content-Length (a
+            # chunked/streamed response -- seen in practice on some CDN
+            # nodes, e.g. Bunkr's), so there's nothing to cross-check the
+            # final size against. That's not the same as incomplete: the
+            # chunked-encoding read loop above only exits without raising
+            # once it's actually seen the stream's real end marker (`requests`
+            # raises ChunkedEncodingError on a connection that drops mid-
+            # chunk), so reaching here at all already means the transfer
+            # finished cleanly -- trust it instead of discarding a real,
+            # complete file over a header the server just didn't send.
+            if total_size > 0 and final != total_size:
                 tmp.unlink(missing_ok=True)
                 resume_from = 0
                 raise DownloadError(f"Size mismatch ({final/(1024*1024):.1f} MB vs expected {total_size/(1024*1024):.1f} MB) — retrying from scratch")
@@ -405,9 +413,17 @@ def download_direct_requests(provider, file_id, output_dir, min_speed_kb=MIN_SPE
                     raise
 
             final = tmp.stat().st_size
-            if total_size == 0:
-                raise DownloadError("Server sent no Content-Length — cannot verify completeness, keeping .part")
-            if final != total_size:
+            # total_size == 0: the server never sent Content-Length (a
+            # chunked/streamed response -- seen in practice on some CDN
+            # nodes, e.g. Bunkr's), so there's nothing to cross-check the
+            # final size against. That's not the same as incomplete: the
+            # chunked-encoding read loop above only exits without raising
+            # once it's actually seen the stream's real end marker (`requests`
+            # raises ChunkedEncodingError on a connection that drops mid-
+            # chunk), so reaching here at all already means the transfer
+            # finished cleanly -- trust it instead of discarding a real,
+            # complete file over a header the server just didn't send.
+            if total_size > 0 and final != total_size:
                 tmp.unlink(missing_ok=True)
                 resume_from = 0
                 raise DownloadError(f"Size mismatch ({final/(1024*1024):.1f} MB vs expected {total_size/(1024*1024):.1f} MB) — retrying from scratch")
