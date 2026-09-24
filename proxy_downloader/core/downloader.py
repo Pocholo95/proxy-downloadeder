@@ -269,15 +269,22 @@ def download_direct_requests(provider, file_id, output_dir, min_speed_kb=MIN_SPE
     connections on the same token is the whole reason this exists instead
     of just calling download_direct() below).
 
-    Retries are bounded (DIRECT_MAX_ATTEMPTS) rather than download_file()'s
-    unlimited proxy-driven ones -- there's no other IP to fall back to here,
-    so a connection that keeps failing isn't going to start working on
-    attempt 6, only burn time this project's whole pitch is about avoiding."""
+    Retries are bounded by *consecutive stalls* (DIRECT_MAX_ATTEMPTS), not
+    a flat attempt count -- confirmed live that some CDNs (Bunkr's) throttle
+    every single connection to a small byte cap regardless of the real file
+    size and just expect the client to reconnect (Range-resume) for more,
+    which needs many attempts that are each legitimate forward progress,
+    not failures. A flat cap treated that exact pattern as 5 failures and
+    gave up with a fraction of the file downloaded. Only an attempt that
+    makes zero forward progress counts against the limit -- there's no
+    other IP to fall back to here, so one that's *truly* stuck isn't going
+    to start working on attempt 6."""
     def report(status, **info):
         if progress_cb:
             progress_cb(status, **info)
 
     attempt = 0
+    stall = 0
 
     fname    = sanitize_filename(hint_name) if hint_name else None
     filepath = (Path(output_dir) / fname) if fname else None
@@ -292,7 +299,7 @@ def download_direct_requests(provider, file_id, output_dir, min_speed_kb=MIN_SPE
     if resume_from:
         console.print(f"  [cyan]↻ Found .part — will resume from {resume_from/(1024*1024):.2f} MB[/cyan]")
 
-    while attempt < DIRECT_MAX_ATTEMPTS:
+    while stall < DIRECT_MAX_ATTEMPTS:
         if cancel_event is not None and cancel_event.is_set():
             report("cancelled", filename=fname)
             return False, "cancelled"
@@ -300,7 +307,7 @@ def download_direct_requests(provider, file_id, output_dir, min_speed_kb=MIN_SPE
         if tmp:
             resume_from = tmp.stat().st_size if tmp.exists() else 0
 
-        console.print(f"  [dim]→ [Attempt {attempt}/{DIRECT_MAX_ATTEMPTS}] direct[/dim]")
+        console.print(f"  [dim]→ [Attempt {attempt}] direct[/dim]")
         report("resolving", attempt=attempt, filename=fname)
 
         try:
@@ -318,6 +325,7 @@ def download_direct_requests(provider, file_id, output_dir, min_speed_kb=MIN_SPE
 
             if r.status_code not in (200, 206):
                 console.print(f"  [red]✗ HTTP {r.status_code}[/red]")
+                stall += 1
                 continue
 
             total_size = int(r.headers.get("Content-Length", 0))
@@ -366,7 +374,17 @@ def download_direct_requests(provider, file_id, output_dir, min_speed_kb=MIN_SPE
             r = requests.get(url, headers=dl_headers, stream=True, timeout=TIMEOUT)
             if r.status_code not in (200, 206):
                 console.print(f"  [red]✗ HTTP {r.status_code}[/red]")
+                stall += 1
                 continue
+
+            # Asked for a Range continuation but got a full 200 back instead
+            # of 206 -- this resource doesn't honor Range at all, so the
+            # response is the *whole* file again, not just what's missing.
+            # Appending it to the existing .part would duplicate content;
+            # start over instead.
+            if resume_from > 0 and r.status_code == 200:
+                console.print("  [yellow]⚠  Server ignored Range — restarting from scratch[/yellow]")
+                resume_from = 0
 
             bytes_dl         = resume_from
             last_check_time  = time.time()
@@ -413,20 +431,36 @@ def download_direct_requests(provider, file_id, output_dir, min_speed_kb=MIN_SPE
                     raise
 
             final = tmp.stat().st_size
-            # total_size == 0: the server never sent Content-Length (a
-            # chunked/streamed response -- seen in practice on some CDN
-            # nodes, e.g. Bunkr's), so there's nothing to cross-check the
-            # final size against. That's not the same as incomplete: the
-            # chunked-encoding read loop above only exits without raising
-            # once it's actually seen the stream's real end marker (`requests`
-            # raises ChunkedEncodingError on a connection that drops mid-
-            # chunk), so reaching here at all already means the transfer
-            # finished cleanly -- trust it instead of discarding a real,
-            # complete file over a header the server just didn't send.
-            if total_size > 0 and final != total_size:
-                tmp.unlink(missing_ok=True)
-                resume_from = 0
-                raise DownloadError(f"Size mismatch ({final/(1024*1024):.1f} MB vs expected {total_size/(1024*1024):.1f} MB) — retrying from scratch")
+            if total_size > 0:
+                if final != total_size:
+                    tmp.unlink(missing_ok=True)
+                    resume_from = 0
+                    raise DownloadError(f"Size mismatch ({final/(1024*1024):.1f} MB vs expected {total_size/(1024*1024):.1f} MB) — retrying from scratch")
+            else:
+                # No Content-Length -- can't verify directly against a known
+                # size. Confirmed live (Bunkr) that some CDNs throttle every
+                # single connection to a small byte cap regardless of the
+                # real file size, closing it "normally" (no exception) well
+                # short of the actual end -- so a clean read loop exit here
+                # does NOT by itself mean done, only that *this* connection
+                # is over. Any forward progress this attempt means there
+                # could well be more: loop back for a Range-continuation
+                # instead of finalizing early. Only settle once a
+                # continuation attempt comes back with truly nothing new --
+                # that's the one condition a throttled-but-real transfer
+                # can't produce, only a genuinely finished one can.
+                if final > resume_from:
+                    stall = 0
+                    console.print(f"  [dim]↻ +{(final-resume_from)/1024:.0f} KB, no Content-Length — continuing[/dim]")
+                    time.sleep(0.3)
+                    continue
+                if resume_from == 0:
+                    # Fresh attempt, zero bytes received at all -- a real
+                    # failure, not "done" (nothing to confirm completion
+                    # against yet).
+                    raise DownloadError("No se recibieron datos (sin Content-Length)")
+                # final == resume_from and resume_from > 0: a Range-
+                # continuation attempt got nothing new -- genuinely done.
 
             expected_hash = provider.expected_hash(file_id)
             if expected_hash:
@@ -453,6 +487,7 @@ def download_direct_requests(provider, file_id, output_dir, min_speed_kb=MIN_SPE
             report("cancelled", filename=fname)
             return False, "cancelled"
         except DownloadError as e:
+            stall += 1
             console.print(f"  [yellow]⚠  {e}[/yellow]")
             report("retry", filename=fname, message=str(e))
         except FileUnavailable as e:
@@ -463,24 +498,28 @@ def download_direct_requests(provider, file_id, output_dir, min_speed_kb=MIN_SPE
             # No proxy pool here to fall back to -- surface it as a plain
             # bounded retry instead of a branch that implies "try a
             # different IP", since there isn't one.
+            stall += 1
             console.print(f"  [yellow]⚠  {e}[/yellow]")
             report("retry", filename=fname, message=str(e))
         except KeyboardInterrupt:
             raise
         except requests.exceptions.Timeout:
+            stall += 1
             console.print("  [red]✗ Timeout[/red]")
             report("retry", filename=fname, message="Timeout")
         except requests.exceptions.ConnectionError:
+            stall += 1
             console.print("  [red]✗ Connection error[/red]")
             report("retry", filename=fname, message="Connection error")
         except Exception as e:
+            stall += 1
             console.print(f"  [red]✗ {type(e).__name__}: {e}[/red]")
             report("retry", filename=fname, message=str(e))
 
         time.sleep(1.5)
 
-    console.print(f"  [red]✗ Giving up after {DIRECT_MAX_ATTEMPTS} attempts[/red]")
-    report("failed", filename=fname, message=f"Falló tras {DIRECT_MAX_ATTEMPTS} intentos")
+    console.print(f"  [red]✗ Giving up after {DIRECT_MAX_ATTEMPTS} attempts with no progress[/red]")
+    report("failed", filename=fname, message=f"Falló tras {DIRECT_MAX_ATTEMPTS} intentos sin avance")
     return False, None
 
 
