@@ -321,7 +321,7 @@ def main():
         elif provider.use_aria2_by_default:
             ok, code = download_direct(provider, fid, dest_dir, hint)
         else:
-            ok, code = download_direct_requests(provider, fid, dest_dir, args.speed, hint)
+            ok, code = download_direct_requests(provider, fid, dest_dir, hint)
 
         if ok:
             success += 1

@@ -636,7 +636,7 @@ class JobManager:
                                                 cancel_event=job.cancel_event)
                 else:
                     ok, code = download_direct_requests(provider, item["file_id"], item["dest_dir"],
-                                                          job.speed, item["hint_name"], progress_cb=cb,
+                                                          item["hint_name"], progress_cb=cb,
                                                           cancel_event=job.cancel_event)
 
                 with job.lock:

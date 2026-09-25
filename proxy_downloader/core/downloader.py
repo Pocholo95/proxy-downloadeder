@@ -259,7 +259,7 @@ def download_file(provider, file_id, proxy_pool, output_dir, min_speed_kb=MIN_SP
 DIRECT_MAX_ATTEMPTS = 5
 
 
-def download_direct_requests(provider, file_id, output_dir, min_speed_kb=MIN_SPEED_KB, hint_name=None,
+def download_direct_requests(provider, file_id, output_dir, hint_name=None,
                               progress_cb=None, cancel_event=None):
     """Same resume/integrity contract as download_file() (Range resume,
     size check, SHA-256, postprocess) but a single direct `requests`
@@ -268,6 +268,16 @@ def download_direct_requests(provider, file_id, output_dir, min_speed_kb=MIN_SPE
     CDN whose signed link doesn't seem to tolerate several simultaneous
     connections on the same token is the whole reason this exists instead
     of just calling download_direct() below).
+
+    No min-speed abort either (unlike download_file()) -- that check exists
+    there to trigger *proxy rotation* (mark_slow, grab a different proxy),
+    which only makes sense when there's another IP to switch to. Here there
+    isn't: confirmed live that a real, working, just-CDN-throttled transfer
+    (hundreds of KB/s, well under a 1.5 MB/s-ish threshold) kept getting
+    aborted and restarted from wherever it was every ~30s by that check,
+    burning all 5 stall attempts on a download that was never actually
+    stuck -- just slow, the same way download_direct()'s aria2 path is
+    already allowed to be without a speed floor.
 
     Retries are bounded by *consecutive stalls* (DIRECT_MAX_ATTEMPTS), not
     a flat attempt count -- confirmed live that some CDNs (Bunkr's) throttle
@@ -420,10 +430,14 @@ def download_direct_requests(provider, file_id, output_dir, min_speed_kb=MIN_SPE
                                                total=total_size, speed_kb=inst_speed)
                                         last_report_time = now
 
+                                    # No min-speed abort here (unlike download_file())
+                                    # -- there's no other IP to switch to on this
+                                    # path, so it would only ever discard real
+                                    # progress on a connection that's merely slow,
+                                    # not stuck (see the docstring). Still reset
+                                    # periodically so the speed shown above stays a
+                                    # rolling rate instead of a lifetime average.
                                     if now - last_check_time >= 30 and bytes_dl > resume_from:
-                                        speed = ((bytes_dl - last_check_bytes) / 1024) / (now - last_check_time)
-                                        if speed < min_speed_kb:
-                                            raise DownloadError("Speed too low")
                                         last_check_time  = now
                                         last_check_bytes = bytes_dl
                     except KeyboardInterrupt:
