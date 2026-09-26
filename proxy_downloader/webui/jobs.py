@@ -314,6 +314,30 @@ class JobManager:
         self._queue.put(job_id)
         return job
 
+    def create_preset_job(self, value, output_dir, entries, proxy_mode="auto"):
+        """Creates a "folder" job whose files are already resolved --
+        `entries` is [(provider, file_id, hint_name, dest_dir), ...] -- so
+        the worker skips _build_items() and goes straight to downloading.
+        Used by the folder watcher, which resolves the album itself to find
+        out what's new and only wants a job (and a row in Descargas) when
+        there's actually something to fetch. The preset is registered
+        before the job is queued, same hand-off retry_job() relies on."""
+        if not entries:
+            raise ValueError("entries is required")
+        out_dir = Path(output_dir).expanduser() if output_dir else self.base_output_dir
+        job_id = uuid.uuid4().hex[:12]
+        job = Job(job_id, "folder", value.strip(), str(out_dir), proxy_mode, MIN_SPEED_KB)
+        for _p, _fid, _fname, dest in entries:
+            Path(dest).mkdir(parents=True, exist_ok=True)
+        preset = [self._mk_item(p, fid, fname, dest) for p, fid, fname, dest in entries]
+        with self._meta_lock:
+            self.jobs[job_id] = job
+            self.order.append(job_id)
+            self._preset_items[job_id] = preset
+        self._persist()
+        self._queue.put(job_id)
+        return job
+
     def get(self, job_id):
         return self.jobs.get(job_id)
 

@@ -4,7 +4,7 @@ const state = {
   view: "all",                        // sidebar selection: "all" | "downloads" | "downloads:<site>" |
                                        // "video" | "extension" | "uploads" | "uploads:<site>" |
                                        // "st:queued" | "st:active" | "st:done" | "st:error" |
-                                       // "view:files" | "view:sites"
+                                       // "view:files" | "view:sites" | "view:watchers"
   query: "",
   selected: new Set(),                // selected task uids (top-level rows only)
   expanded: new Set(),                // task uids currently showing their child rows
@@ -43,6 +43,15 @@ const els = {
   chkAll: document.getElementById("chk-all"),
   filesView: document.getElementById("files-view"),
   sitesView: document.getElementById("sites-view"),
+  watchersView: document.getElementById("watchers-view"),
+  watchersList: document.getElementById("watchers-list"),
+  watcherUrl: document.getElementById("watcher-url"),
+  watcherInterval: document.getElementById("watcher-interval"),
+  watcherAddBtn: document.getElementById("watcher-add-btn"),
+  watcherError: document.getElementById("watcher-error"),
+  fieldWatch: document.getElementById("field-watch"),
+  watchMode: document.getElementById("watch-mode"),
+  watchInterval: document.getElementById("watch-interval"),
   // status bar
   sbDlSpeed: document.getElementById("sb-dlspeed"),
   sbUlSpeed: document.getElementById("sb-ulspeed"),
@@ -298,6 +307,7 @@ function setModalKind(kind) {
   // download engine (jobs.py) -- yt-dlp/uploads have no resolve-then-park
   // step to hold at.
   els.fieldHold.classList.toggle("hidden", isVideo || isUpload);
+  els.fieldWatch.classList.toggle("hidden", isVideo || isUpload);
   els.submitBtn.textContent = isUpload ? "Subir" : "Descargar";
   if (isUpload) refreshUploadSites();
 }
@@ -407,6 +417,10 @@ els.form.addEventListener("submit", async (e) => {
   const value = state.kind === "batch" ? els.inputBatch.value : els.inputSingle.value;
   if (!value.trim()) {
     els.formError.textContent = "Falta la URL/ID";
+    return;
+  }
+  if (els.watchMode.checked) {
+    await submitWatchers(value);
     return;
   }
   const body = {
@@ -715,6 +729,8 @@ function buildSidebar(entries) {
   html += `<div class="side-group"><div class="side-heading">Vistas</div>`;
   html += sideItem("view:files", "Archivos", "",
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/></svg>');
+  html += sideItem("view:watchers", "Carpetas vigiladas", _watcherCount || "",
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>');
   html += sideItem("view:sites", "Sitios y proxies", "",
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z"/></svg>');
   html += `</div>`;
@@ -1109,7 +1125,7 @@ function updateStatusBar(entries) {
 const VIEW_TITLES = {
   all: "Todo", downloads: "Descargas", video: "Video (yt-dlp)", extension: "Extensión", uploads: "Subidas",
   "st:held": "En espera", "st:queued": "En cola", "st:active": "Activos", "st:done": "Completados", "st:error": "Con error",
-  "view:files": "Archivos", "view:sites": "Sitios y proxies",
+  "view:files": "Archivos", "view:sites": "Sitios y proxies", "view:watchers": "Carpetas vigiladas",
 };
 function viewTitle() {
   if (state.view.startsWith("downloads:")) return "Descargas · " + state.view.slice(10);
@@ -1122,15 +1138,20 @@ function renderCurrentView() {
   els.viewTitle.textContent = viewTitle();
   const isFiles = state.view === "view:files";
   const isSites = state.view === "view:sites";
-  els.tableView.style.display = isFiles || isSites ? "none" : "block";
+  const isWatchers = state.view === "view:watchers";
+  const isTable = !isFiles && !isSites && !isWatchers;
+  els.tableView.style.display = isTable ? "block" : "none";
   els.filesView.style.display = isFiles ? "block" : "none";
   els.sitesView.style.display = isSites ? "block" : "none";
-  els.bulkBar.classList.toggle("show", !isFiles && !isSites && state.selected.size > 0);
+  els.watchersView.style.display = isWatchers ? "block" : "none";
+  els.bulkBar.classList.toggle("show", isTable && state.selected.size > 0);
   els.refreshFilesBtn.style.display = isFiles ? "flex" : "none";
-  els.viewSub.style.display = isFiles || isSites ? "none" : "inline";
+  els.viewSub.style.display = isTable ? "inline" : "none";
 
   if (isFiles) {
     loadFiles(state.filesPath);
+  } else if (isWatchers) {
+    refreshWatchers();
   } else if (isSites) {
     refreshSites();
     refreshProxySources();
@@ -1147,7 +1168,8 @@ async function refreshTasks() {
     for (const uid of [...state.selected]) if (!_lastEntries.has(uid)) state.selected.delete(uid);
     for (const uid of [...state.expanded]) if (!_lastEntries.has(uid)) state.expanded.delete(uid);
     buildSidebar(entries);
-    if (state.view !== "view:files" && state.view !== "view:sites") renderTaskBody(entries);
+    if (!state.view.startsWith("view:")) renderTaskBody(entries);
+    refreshWatchers();
     updateStatusBar(entries);
   } catch (err) {
     els.sbStatusMsg.textContent = err.message;
@@ -1155,6 +1177,181 @@ async function refreshTasks() {
 }
 
 els.refreshFilesBtn.addEventListener("click", () => loadFiles(state.filesPath));
+
+// ═══════════════════════════════════════════════════════════════════════
+// Carpetas vigiladas (folder watcher)
+// ═══════════════════════════════════════════════════════════════════════
+
+let _watcherCount = 0;
+
+async function createWatcher(url, intervalHours, outputDir) {
+  return fetchJSON("/api/watchers", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url, interval_hours: intervalHours, output_dir: outputDir || null }),
+  });
+}
+
+// "Agregar" modal with the "Vigilar" checkbox on: one watcher per pasted
+// line (each is checked right away, so the first download starts at once).
+// Lines that aren't a folder/album come back as errors from the server and
+// are listed instead of failing the ones that worked.
+async function submitWatchers(value) {
+  const lines = value.split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#") && !/^folder\s*:/i.test(l));
+  const hours = els.watchInterval.value || 24;
+  const outDir = els.outputDir.value.trim() || null;
+  const errors = [];
+  let added = 0;
+  for (const line of lines) {
+    try {
+      await createWatcher(line, hours, outDir);
+      added++;
+    } catch (err) {
+      errors.push(`${truncate(line, 50)}: ${err.message}`);
+    }
+  }
+  if (errors.length) els.formError.textContent = errors.join(" · ");
+  if (added) {
+    els.inputSingle.value = "";
+    els.inputBatch.value = "";
+    els.watchMode.checked = false;
+    renderDetectSingle();
+    renderDetectBatch();
+    if (!errors.length) closeModal();
+    state.view = "view:watchers";
+    renderCurrentView();
+  }
+}
+
+function fmtWhen(ts) {
+  if (!ts) return "—";
+  return new Date(ts * 1000).toLocaleString("es", { dateStyle: "short", timeStyle: "short" });
+}
+
+function fmtIn(ts) {
+  const secs = ts - Date.now() / 1000;
+  if (secs <= 60) return "ahora";
+  if (secs < 3600) return `en ${Math.round(secs / 60)} min`;
+  if (secs < 86400) return `en ${(secs / 3600).toFixed(1)} h`;
+  return `en ${(secs / 86400).toFixed(1)} d`;
+}
+
+function watcherStatusHtml(w) {
+  if (w.checking) return `<span class="status-pill st-active"><span class="dot"></span>revisando…</span>`;
+  if (!w.enabled) return `<span class="status-pill st-warn"><span class="dot"></span>pausado</span>`;
+  if (w.last_status === "error") return `<span class="status-pill st-error"><span class="dot"></span>error</span>`;
+  if (w.last_status === "pending") return `<span class="status-pill st-warn"><span class="dot"></span>pendiente</span>`;
+  return `<span class="status-pill st-done"><span class="dot"></span>ok</span>`;
+}
+
+function watcherRow(w) {
+  const jobStatus = w.job_status ? ` · descarga: ${STATUS_LABELS[w.job_status] || w.job_status}` : "";
+  let detail;
+  if (w.last_status === "error") detail = `<div class="name-sub err">${escapeAttr(w.last_error || "")}</div>`;
+  else if (w.last_check) detail = `<div class="name-sub">${w.last_new ? `${w.last_new} nuevo(s) en la última revisión` : "sin novedades"} · ${w.remote_count} en la carpeta${jobStatus}</div>`;
+  else detail = `<div class="name-sub">Todavía no se revisó</div>`;
+  const next = w.enabled ? fmtIn(w.next_check) : "—";
+  return `<tr>
+    <td>
+      <div class="name-main">${escapeAttr(truncate(w.url, 70))}</div>
+      ${detail}
+    </td>
+    <td>${escapeAttr(w.site)}</td>
+    <td>${watcherStatusHtml(w)}</td>
+    <td class="dim">${fmtWhen(w.last_check)}<br>siguiente: ${next}</td>
+    <td><input type="number" class="watcher-interval-input" data-wid="${w.id}" value="${w.interval_hours}" min="1" step="1" style="width:64px;"> h</td>
+    <td class="actions">
+      <button type="button" class="tbtn ghost" data-watcher-act="check" data-wid="${w.id}" title="Revisar ahora">Revisar</button>
+      <button type="button" class="tbtn ghost" data-watcher-act="${w.enabled ? "pause" : "resume"}" data-wid="${w.id}">${w.enabled ? "Pausar" : "Reanudar"}</button>
+      <button type="button" class="tbtn ghost" data-watcher-act="copy" data-url="${escapeAttr(w.url)}" title="Copiar link">Link</button>
+      <button type="button" class="tbtn ghost" data-watcher-act="delete" data-wid="${w.id}" title="Deja de vigilar (no borra archivos)">Quitar</button>
+    </td>
+  </tr>`;
+}
+
+async function refreshWatchers() {
+  // Don't rebuild the table while an interval input is focused -- the
+  // periodic refresh would swallow what's being typed.
+  if (document.activeElement && document.activeElement.classList &&
+      document.activeElement.classList.contains("watcher-interval-input")) return;
+  try {
+    const watchers = await fetchJSON("/api/watchers");
+    _watcherCount = watchers.length;
+    if (state.view !== "view:watchers") return;
+    if (!watchers.length) {
+      els.watchersList.innerHTML = `<p class="dim">No hay carpetas vigiladas todavía.</p>`;
+      return;
+    }
+    const html = `<table class="data-table">
+      <thead><tr><th>Carpeta</th><th>Sitio</th><th>Estado</th><th>Revisión</th><th>Intervalo</th><th></th></tr></thead>
+      <tbody>${watchers.map(watcherRow).join("")}</tbody>
+    </table>`;
+    if (!updateListHTML(els.watchersList, "watchers", html)) return;
+  } catch (err) {
+    els.watchersList.innerHTML = `<p class="error-msg">${err.message}</p>`;
+  }
+}
+
+els.watcherAddBtn.addEventListener("click", async () => {
+  els.watcherError.textContent = "";
+  const url = els.watcherUrl.value.trim();
+  if (!url) {
+    els.watcherError.textContent = "Falta la URL de la carpeta";
+    return;
+  }
+  try {
+    await createWatcher(url, els.watcherInterval.value || 24, null);
+    els.watcherUrl.value = "";
+    refreshWatchers();
+  } catch (err) {
+    els.watcherError.textContent = err.message;
+  }
+});
+
+els.watchersList.addEventListener("click", async (e) => {
+  const btn = e.target.closest("button[data-watcher-act]");
+  if (!btn) return;
+  const act = btn.dataset.watcherAct;
+  const wid = btn.dataset.wid;
+  try {
+    if (act === "copy") {
+      copyToClipboard(btn.dataset.url, btn);
+      return;
+    }
+    if (act === "check") {
+      await fetchJSON(`/api/watchers/${wid}/check`, { method: "POST" });
+    } else if (act === "pause" || act === "resume") {
+      await fetchJSON(`/api/watchers/${wid}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: act === "resume" }),
+      });
+    } else if (act === "delete") {
+      if (!confirm("¿Dejar de vigilar esta carpeta? Los archivos ya descargados se quedan.")) return;
+      await fetchJSON(`/api/watchers/${wid}`, { method: "DELETE" });
+    }
+    refreshWatchers();
+  } catch (err) {
+    els.watcherError.textContent = err.message;
+  }
+});
+
+els.watchersList.addEventListener("change", async (e) => {
+  const input = e.target.closest("input.watcher-interval-input");
+  if (!input) return;
+  try {
+    await fetchJSON(`/api/watchers/${input.dataset.wid}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ interval_hours: input.value }),
+    });
+    els.watcherError.textContent = "";
+  } catch (err) {
+    els.watcherError.textContent = err.message;
+  }
+  input.blur();
+  refreshWatchers();
+});
 
 // ═══════════════════════════════════════════════════════════════════════
 // Sitios y proxies view

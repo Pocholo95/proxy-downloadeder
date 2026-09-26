@@ -95,6 +95,28 @@
         <div id="files-list"></div>
       </div>
 
+      <div class="view-panel" id="watchers-view" style="display:none;">
+        <div class="settings-block">
+          <div class="settings-block-head">
+            <h3>Carpetas vigiladas</h3>
+            <span class="dim">Se descargan al agregarlas y se revisan cada cierto tiempo; solo se bajan los archivos nuevos. Si borrás un archivo local, no se vuelve a bajar.</span>
+          </div>
+          <div class="field-row">
+            <div class="field" style="flex:3;">
+              <label for="watcher-url">URL de la carpeta / álbum</label>
+              <input type="text" id="watcher-url" placeholder="https://bunkr.cr/a/XXXXXXX">
+            </div>
+            <div class="field">
+              <label for="watcher-interval">Revisar cada (horas)</label>
+              <input type="number" id="watcher-interval" value="24" min="1" step="1">
+            </div>
+          </div>
+          <button type="button" class="tbtn primary" id="watcher-add-btn">Vigilar carpeta</button>
+          <span class="error-msg" id="watcher-error"></span>
+        </div>
+        <div id="watchers-list"></div>
+      </div>
+
       <div class="view-panel" id="sites-view" style="display:none;">
         <div class="settings-block">
           <div class="settings-block-head">
@@ -212,6 +234,14 @@ https://pixeldrain.com/u/XXXXXXX"></textarea>
               Solo agregar, no descargar todavía
             </label>
             <span class="field-hint">Resuelve el link/carpeta/batch (encuentra los archivos) y lo deja en "En espera" — elegís vos cuándo iniciarlo, desde esa categoría en el sidebar.</span>
+          </div>
+
+          <div class="field-check hidden" id="field-watch">
+            <label class="check-label">
+              <input type="checkbox" id="watch-mode">
+              Vigilar las carpetas/álbumes de esta lista
+            </label>
+            <span class="field-hint">Las descarga ahora y las revisa cada <input type="number" id="watch-interval" value="24" min="1" step="1" style="width:56px;"> horas buscando archivos nuevos. Aparecen en "Carpetas vigiladas". Los links que no sean carpetas se ignoran.</span>
           </div>
 
           <div class="field hidden" id="field-upload">

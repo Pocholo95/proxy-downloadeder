@@ -53,3 +53,14 @@ def record(state_dir, site, file_id, path):
     data = _load(state_dir)
     data[_key(site, file_id)] = {"path": str(path), "recorded_at": time.time()}
     _save(state_dir, data)
+
+
+def snapshot(state_dir):
+    """{site:file_id -> recorded path} for every known download, loaded once
+    so a caller checking hundreds of items (the folder watcher) doesn't
+    re-read the whole file per lookup."""
+    return {k: v.get("path") for k, v in _load(state_dir).items()}
+
+
+def snapshot_key(site, file_id):
+    return _key(site, file_id)

@@ -20,6 +20,7 @@ from .jobs import JobManager
 from .upload_jobs import UploadManager
 from .ytdlp_jobs import YtdlpManager
 from .extension_jobs import ExtensionJobManager
+from .watchers import WatcherManager
 from . import download_router
 
 OUTPUT_DIR = os.environ.get("DOWNLOAD_DIR", "/downloads")
@@ -31,6 +32,7 @@ manager = JobManager(base_output_dir=OUTPUT_DIR, state_dir=STATE_DIR)
 upload_manager = UploadManager(state_dir=STATE_DIR, tmp_dir=UPLOAD_TMP_DIR)
 ytdlp_manager = YtdlpManager(base_output_dir=OUTPUT_DIR, state_dir=STATE_DIR)
 extension_manager = ExtensionJobManager(base_output_dir=OUTPUT_DIR, state_dir=STATE_DIR)
+watcher_manager = WatcherManager(state_dir=STATE_DIR, job_manager=manager)
 
 
 @app.get("/")
@@ -62,6 +64,53 @@ def api_set_site_aria2(name):
         manager.set_site_aria2(name, action)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
+    return jsonify({"ok": True})
+
+
+@app.get("/api/watchers")
+def api_list_watchers():
+    return jsonify(watcher_manager.list())
+
+
+@app.post("/api/watchers")
+def api_create_watcher():
+    data = request.get_json(silent=True) or {}
+    try:
+        w = watcher_manager.add(
+            data.get("url"),
+            24 if data.get("interval_hours") is None else data.get("interval_hours"),
+            data.get("output_dir") or None,
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify(w), 201
+
+
+@app.patch("/api/watchers/<wid>")
+def api_update_watcher(wid):
+    data = request.get_json(silent=True) or {}
+    try:
+        w = watcher_manager.update(wid, data.get("interval_hours"), data.get("enabled"))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify(w)
+
+
+@app.post("/api/watchers/<wid>/check")
+def api_check_watcher(wid):
+    try:
+        watcher_manager.check_now(wid)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+    return jsonify({"ok": True})
+
+
+@app.delete("/api/watchers/<wid>")
+def api_delete_watcher(wid):
+    try:
+        watcher_manager.delete(wid)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
     return jsonify({"ok": True})
 
 
