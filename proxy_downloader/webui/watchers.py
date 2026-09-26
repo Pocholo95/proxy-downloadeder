@@ -15,6 +15,7 @@ One scheduler thread walks the watchers every SCHEDULER_TICK seconds; a
 "check now" just wakes it early.
 """
 import json
+import re
 import threading
 import time
 import uuid
@@ -89,7 +90,7 @@ class WatcherManager:
         out.sort(key=lambda w: w["created_at"], reverse=True)
         return out
 
-    def add(self, url, interval_hours=DEFAULT_INTERVAL_HOURS, output_dir=None):
+    def add(self, url, interval_hours=DEFAULT_INTERVAL_HOURS, output_dir=None, name=None):
         url = (url or "").strip()
         if not url:
             raise ValueError("Falta la URL de la carpeta")
@@ -100,6 +101,10 @@ class WatcherManager:
         if not folder_id:
             raise ValueError("Solo se pueden vigilar carpetas/álbumes, no archivos sueltos")
         hours = _validate_interval(interval_hours)
+        name = (name or "").strip()
+        dir_name = sanitize_filename(name) if name else None
+        if name and (not dir_name or not re.search(r"\w", name)):
+            raise ValueError("Nombre de carpeta inválido")
         out_dir = str(Path(output_dir).expanduser()) if output_dir else str(self.jobs.base_output_dir)
 
         with self._lock:
@@ -112,6 +117,8 @@ class WatcherManager:
                 "url": url,
                 "site": provider.name,
                 "folder_id": folder_id,
+                "name": name or None,
+                "dir_name": dir_name,
                 "output_dir": out_dir,
                 "interval_hours": hours,
                 "enabled": True,
@@ -257,7 +264,9 @@ class WatcherManager:
             return {"error": "No se pudieron leer archivos de la carpeta (vacía, borrada o el sitio falló)"}
 
         history = download_history.snapshot(self.state_dir)
-        sub_dir = Path(w["output_dir"]) / w["folder_id"]
+        # A user-chosen name (dir_name) replaces the raw album id as the
+        # subfolder; watchers made before names existed have neither key.
+        sub_dir = Path(w["output_dir"]) / (w.get("dir_name") or w["folder_id"])
         new = []
         for fid, fname in files:
             if download_history.snapshot_key(provider.name, fid) in history:

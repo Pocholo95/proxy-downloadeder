@@ -80,6 +80,7 @@ def api_create_watcher():
             data.get("url"),
             24 if data.get("interval_hours") is None else data.get("interval_hours"),
             data.get("output_dir") or None,
+            data.get("name") or None,
         )
     except ValueError as e:
         return jsonify({"error": str(e)}), 400

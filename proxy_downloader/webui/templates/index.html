@@ -106,6 +106,10 @@
               <label for="watcher-url">URL de la carpeta / álbum</label>
               <input type="text" id="watcher-url" placeholder="https://bunkr.cr/a/XXXXXXX">
             </div>
+            <div class="field" style="flex:2;">
+              <label for="watcher-name">Nombre de la carpeta (opcional)</label>
+              <input type="text" id="watcher-name" placeholder="Fotos de perritos">
+            </div>
             <div class="field">
               <label for="watcher-interval">Revisar cada (horas)</label>
               <input type="number" id="watcher-interval" value="24" min="1" step="1">
@@ -241,7 +245,7 @@ https://pixeldrain.com/u/XXXXXXX"></textarea>
               <input type="checkbox" id="watch-mode">
               Vigilar las carpetas/álbumes de esta lista
             </label>
-            <span class="field-hint">Las descarga ahora y las revisa cada <input type="number" id="watch-interval" value="24" min="1" step="1" style="width:56px;"> horas buscando archivos nuevos. Aparecen en "Carpetas vigiladas". Los links que no sean carpetas se ignoran.</span>
+            <span class="field-hint">Las descarga ahora y las revisa cada <input type="number" id="watch-interval" value="24" min="1" step="1" style="width:56px;"> horas buscando archivos nuevos. Nombre de carpeta (solo si pegás una): <input type="text" id="watch-name" placeholder="Fotos de perritos" style="width:170px;">. Aparecen en "Carpetas vigiladas". Los links que no sean carpetas se ignoran.</span>
           </div>
 
           <div class="field hidden" id="field-upload">

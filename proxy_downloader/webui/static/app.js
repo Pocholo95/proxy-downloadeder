@@ -47,6 +47,8 @@ const els = {
   watchersList: document.getElementById("watchers-list"),
   watcherUrl: document.getElementById("watcher-url"),
   watcherInterval: document.getElementById("watcher-interval"),
+  watcherName: document.getElementById("watcher-name"),
+  watchName: document.getElementById("watch-name"),
   watcherAddBtn: document.getElementById("watcher-add-btn"),
   watcherError: document.getElementById("watcher-error"),
   fieldWatch: document.getElementById("field-watch"),
@@ -1184,11 +1186,11 @@ els.refreshFilesBtn.addEventListener("click", () => loadFiles(state.filesPath));
 
 let _watcherCount = 0;
 
-async function createWatcher(url, intervalHours, outputDir) {
+async function createWatcher(url, intervalHours, outputDir, name) {
   return fetchJSON("/api/watchers", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url, interval_hours: intervalHours, output_dir: outputDir || null }),
+    body: JSON.stringify({ url, interval_hours: intervalHours, output_dir: outputDir || null, name: name || null }),
   });
 }
 
@@ -1204,7 +1206,8 @@ async function submitWatchers(value) {
   let added = 0;
   for (const line of lines) {
     try {
-      await createWatcher(line, hours, outDir);
+      // One name can only label one folder -- ignored for a multi-line paste.
+      await createWatcher(line, hours, outDir, lines.length === 1 ? els.watchName.value.trim() : null);
       added++;
     } catch (err) {
       errors.push(`${truncate(line, 50)}: ${err.message}`);
@@ -1215,6 +1218,7 @@ async function submitWatchers(value) {
     els.inputSingle.value = "";
     els.inputBatch.value = "";
     els.watchMode.checked = false;
+    els.watchName.value = "";
     renderDetectSingle();
     renderDetectBatch();
     if (!errors.length) closeModal();
@@ -1253,7 +1257,8 @@ function watcherRow(w) {
   const next = w.enabled ? fmtIn(w.next_check) : "—";
   return `<tr>
     <td>
-      <div class="name-main">${escapeAttr(truncate(w.url, 70))}</div>
+      <div class="name-main">${escapeAttr(w.name || truncate(w.url, 70))}</div>
+      ${w.name ? `<div class="name-sub">${escapeAttr(truncate(w.url, 70))}</div>` : ""}
       ${detail}
     </td>
     <td>${escapeAttr(w.site)}</td>
@@ -1300,8 +1305,9 @@ els.watcherAddBtn.addEventListener("click", async () => {
     return;
   }
   try {
-    await createWatcher(url, els.watcherInterval.value || 24, null);
+    await createWatcher(url, els.watcherInterval.value || 24, null, els.watcherName.value.trim());
     els.watcherUrl.value = "";
+    els.watcherName.value = "";
     refreshWatchers();
   } catch (err) {
     els.watcherError.textContent = err.message;
