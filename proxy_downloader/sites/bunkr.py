@@ -28,11 +28,20 @@ since Bunkr doesn't publish an API):
     a different CDN namespace from the `*.cdn.cr` nodes jsCDN/the sign API
     deal in above, and are already the final link — nothing to scrape or
     sign, download_url() below just uses them verbatim.
+  - An album page's item cards only link to the item page
+    (`/f|i|v/<slug>`) — the slug is an opaque id, NOT the real filename
+    (confirmed against Lysagxra/BunkrDownloader: it fetches every item page
+    and reads a `<h1 class="...text-subs...">` tag for the real name,
+    there's no shortcut). resolve_folder() below does the same, one extra
+    GET per item, in parallel -- otherwise every file in the album would be
+    saved on disk under its meaningless slug with no extension.
 
 None of this is bypassing real security — same access a browser gets for a
 public link, just automated; no anti-bot/PoW/CAPTCHA was hit in testing.
 """
+import html
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse, urlunparse
 
 import requests
@@ -68,6 +77,12 @@ FOLDER_URL_RE = re.compile(r'(?:https?://)?([a-z0-9.-]*bunkr[a-z0-9.-]*\.\w+)/a/
 JS_CDN_RE     = re.compile(r'var\s+jsCDN\s*=\s*"([^"]+)"')
 FILE_ID_RE    = re.compile(r'<script[^>]*\bdata-file-id="(\d+)"')
 ITEM_LINK_RE  = re.compile(r'<a[^>]*class="after:absolute after:z-10 after:inset-0"[^>]*href="([^"]+)"')
+# The item page's real filename -- see module docstring. Matched loosely
+# (class attr just has to contain "text-subs") since Tailwind's exact class
+# list on this tag has already changed once between Bunkr revisions.
+ITEM_TITLE_RE = re.compile(r'<h1\b[^>]*\btext-subs\b[^>]*>(.*?)</h1>', re.I | re.S)
+TAG_RE        = re.compile(r'<[^>]+>')
+ITEM_NAME_THREADS = 12
 VALID_HREF_RE = re.compile(r'^/[fiv]/[^\s?#]+$')
 PAGINATION_RE = re.compile(r'<nav[^>]*class="[^"]*pagination[^"]*"[^>]*>(.*?)</nav>', re.S)
 PAGE_NUM_RE   = re.compile(r'\d+')
@@ -134,27 +149,59 @@ class BunkrProvider(SiteProvider):
                 page_url = url if page == 1 else f"{url}?page={page}"
                 r = requests.get(page_url, headers=self.request_headers(folder_id), timeout=TIMEOUT)
                 r.raise_for_status()
-                html = r.text
+                page_html = r.text
 
                 if page == 1:
-                    nav = PAGINATION_RE.search(html)
+                    nav = PAGINATION_RE.search(page_html)
                     if nav:
                         nums = [int(n) for n in PAGE_NUM_RE.findall(nav.group(1))]
                         if nums:
                             max_page = max(nums)
 
-                for href in ITEM_LINK_RE.findall(html):
+                for href in ITEM_LINK_RE.findall(page_html):
                     if VALID_HREF_RE.match(href):
                         item_url = f"{host_page}{href}"
-                        name = href.rsplit("/", 1)[-1]
-                        items.append((item_url, name))
+                        slug = href.rsplit("/", 1)[-1]
+                        items.append((item_url, slug))
 
                 page += 1
 
-            return items
+            return self._resolve_real_names(items, folder_id)
         except Exception as e:
             console.print(f"[red]✗ Error resolving Bunkr album {folder_id}: {e}[/red]")
             return []
+
+    def _resolve_real_names(self, items, folder_id):
+        """Fetches every item page (in parallel) to replace its meaningless
+        slug with the real filename+extension from the page's <h1> title --
+        see module docstring for why the album listing alone can't give us
+        this. An item whose page fails to load or doesn't match keeps its
+        slug rather than dropping the file from the album."""
+        if not items:
+            return items
+        headers = self.request_headers(folder_id)
+
+        def fetch_name(item_url):
+            r = requests.get(item_url, headers=headers, timeout=TIMEOUT)
+            r.raise_for_status()
+            m = ITEM_TITLE_RE.search(r.text)
+            if not m:
+                return None
+            title = html.unescape(TAG_RE.sub("", m.group(1))).strip()
+            return title or None
+
+        resolved = list(items)
+        with ThreadPoolExecutor(max_workers=min(ITEM_NAME_THREADS, len(items))) as ex:
+            futures = {ex.submit(fetch_name, url): i for i, (url, _slug) in enumerate(items)}
+            for future in as_completed(futures):
+                i = futures[future]
+                try:
+                    real_name = future.result()
+                except Exception:
+                    real_name = None
+                if real_name:
+                    resolved[i] = (items[i][0], real_name)
+        return resolved
 
     def download_url(self, file_id, proxies=None):
         # A raw CDN link (DIRECT_CDN_RE) IS the download URL already —
