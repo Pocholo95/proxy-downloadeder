@@ -64,3 +64,45 @@ def snapshot(state_dir):
 
 def snapshot_key(site, file_id):
     return _key(site, file_id)
+
+
+def list_all(state_dir):
+    """Every recorded download as a flat list, newest first -- for the
+    "Historial" web UI view. `key` on each entry round-trips to delete()/
+    get_entry() below. Splitting the key back into (site, file_id) only on
+    the first ":" is safe even though a file_id can itself be a full URL
+    full of colons/slashes (e.g. Bunkr) -- site names never contain ":"."""
+    out = []
+    for key, entry in _load(state_dir).items():
+        site, _, file_id = key.partition(":")
+        out.append({
+            "key": key,
+            "site": site,
+            "file_id": file_id,
+            "path": entry.get("path"),
+            "recorded_at": entry.get("recorded_at"),
+        })
+    out.sort(key=lambda e: e["recorded_at"] or 0, reverse=True)
+    return out
+
+
+def get_entry(state_dir, key):
+    entry = _load(state_dir).get(key)
+    if not entry:
+        return None
+    site, _, file_id = key.partition(":")
+    return {"key": key, "site": site, "file_id": file_id,
+            "path": entry.get("path"), "recorded_at": entry.get("recorded_at")}
+
+
+def delete(state_dir, key):
+    data = _load(state_dir)
+    if key not in data:
+        return False
+    del data[key]
+    _save(state_dir, data)
+    return True
+
+
+def clear_all(state_dir):
+    _save(state_dir, {})

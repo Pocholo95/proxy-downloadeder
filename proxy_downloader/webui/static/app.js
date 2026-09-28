@@ -4,7 +4,7 @@ const state = {
   view: "all",                        // sidebar selection: "all" | "downloads" | "downloads:<site>" |
                                        // "video" | "extension" | "uploads" | "uploads:<site>" |
                                        // "st:queued" | "st:active" | "st:done" | "st:error" |
-                                       // "view:files" | "view:sites" | "view:watchers"
+                                       // "view:files" | "view:sites" | "view:watchers" | "view:history"
   query: "",
   selected: new Set(),                // selected task uids (top-level rows only)
   expanded: new Set(),                // task uids currently showing their child rows
@@ -54,6 +54,10 @@ const els = {
   fieldWatch: document.getElementById("field-watch"),
   watchMode: document.getElementById("watch-mode"),
   watchInterval: document.getElementById("watch-interval"),
+  historyView: document.getElementById("history-view"),
+  historyList: document.getElementById("history-list"),
+  historySearch: document.getElementById("history-search"),
+  historyClearBtn: document.getElementById("history-clear-btn"),
   // status bar
   sbDlSpeed: document.getElementById("sb-dlspeed"),
   sbUlSpeed: document.getElementById("sb-ulspeed"),
@@ -733,6 +737,8 @@ function buildSidebar(entries) {
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/></svg>');
   html += sideItem("view:watchers", "Carpetas vigiladas", _watcherCount || "",
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>');
+  html += sideItem("view:history", "Historial", "",
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>');
   html += sideItem("view:sites", "Sitios y proxies", "",
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z"/></svg>');
   html += `</div>`;
@@ -1128,6 +1134,7 @@ const VIEW_TITLES = {
   all: "Todo", downloads: "Descargas", video: "Video (yt-dlp)", extension: "Extensión", uploads: "Subidas",
   "st:held": "En espera", "st:queued": "En cola", "st:active": "Activos", "st:done": "Completados", "st:error": "Con error",
   "view:files": "Archivos", "view:sites": "Sitios y proxies", "view:watchers": "Carpetas vigiladas",
+  "view:history": "Historial de descargas",
 };
 function viewTitle() {
   if (state.view.startsWith("downloads:")) return "Descargas · " + state.view.slice(10);
@@ -1141,19 +1148,23 @@ function renderCurrentView() {
   const isFiles = state.view === "view:files";
   const isSites = state.view === "view:sites";
   const isWatchers = state.view === "view:watchers";
-  const isTable = !isFiles && !isSites && !isWatchers;
+  const isHistory = state.view === "view:history";
+  const isTable = !isFiles && !isSites && !isWatchers && !isHistory;
   els.tableView.style.display = isTable ? "block" : "none";
   els.filesView.style.display = isFiles ? "block" : "none";
   els.sitesView.style.display = isSites ? "block" : "none";
   els.watchersView.style.display = isWatchers ? "block" : "none";
+  els.historyView.style.display = isHistory ? "block" : "none";
   els.bulkBar.classList.toggle("show", isTable && state.selected.size > 0);
-  els.refreshFilesBtn.style.display = isFiles ? "flex" : "none";
+  els.refreshFilesBtn.style.display = (isFiles || isHistory) ? "flex" : "none";
   els.viewSub.style.display = isTable ? "inline" : "none";
 
   if (isFiles) {
     loadFiles(state.filesPath);
   } else if (isWatchers) {
     refreshWatchers();
+  } else if (isHistory) {
+    refreshHistory();
   } else if (isSites) {
     refreshSites();
     refreshProxySources();
@@ -1178,7 +1189,10 @@ async function refreshTasks() {
   }
 }
 
-els.refreshFilesBtn.addEventListener("click", () => loadFiles(state.filesPath));
+els.refreshFilesBtn.addEventListener("click", () => {
+  if (state.view === "view:history") refreshHistory();
+  else loadFiles(state.filesPath);
+});
 
 // ═══════════════════════════════════════════════════════════════════════
 // Carpetas vigiladas (folder watcher)
@@ -1369,6 +1383,115 @@ els.watchersList.addEventListener("change", async (e) => {
   }
   input.blur();
   refreshWatchers();
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// Historial de descargas — every (site, file_id) the app has ever recorded
+// as successfully downloaded (see download_history.py), independent of
+// the task table above (which only shows recent jobs). Lets the user
+// clear the dedupe record for something, or force a redownload of a file
+// whether or not it still exists.
+// ═══════════════════════════════════════════════════════════════════════
+
+let _lastHistory = [];
+
+function historyRow(e) {
+  const icon = e.kind === "video" ? "🎬" : e.kind === "audio" ? "🎵" : e.kind === "image" ? "🖼️" : "📄";
+  const nameCell = (e.exists && e.rel_path && e.kind)
+    ? `<button type="button" class="link-btn" data-hist-preview="${escapeAttr(e.rel_path)}" data-kind="${e.kind}">${icon} ${escapeAttr(e.name || e.file_id)}</button>`
+    : `${icon} ${escapeAttr(e.name || e.file_id)}`;
+  return `<tr>
+    <td>
+      <div class="name-main">${nameCell}</div>
+      <div class="name-sub${e.exists ? "" : " warn"}">${e.exists ? escapeAttr(e.path || "") : "Archivo no encontrado en disco"}</div>
+    </td>
+    <td>${escapeAttr(e.site)}</td>
+    <td class="num-col">${e.exists ? fmtBytes(e.size || 0) : "—"}</td>
+    <td class="dim">${fmtWhen(e.recorded_at)}</td>
+    <td class="actions">
+      <button type="button" class="tbtn ghost" data-hist-act="redownload" data-key="${escapeAttr(e.key)}" title="Vuelve a descargarlo desde cero">Redescargar</button>
+      <button type="button" class="tbtn ghost" data-hist-act="remove" data-key="${escapeAttr(e.key)}" title="Quita el registro (no borra el archivo)">Quitar</button>
+    </td>
+  </tr>`;
+}
+
+function historyMatches(e, q) {
+  if (!q) return true;
+  const hay = `${e.name || ""} ${e.site || ""} ${e.path || ""}`.toLowerCase();
+  return hay.includes(q);
+}
+
+async function refreshHistory() {
+  try {
+    _lastHistory = await fetchJSON("/api/history");
+  } catch (err) {
+    els.historyList.innerHTML = `<p class="error-msg">${err.message}</p>`;
+    return;
+  }
+  renderHistory();
+}
+
+function renderHistory() {
+  if (state.view !== "view:history") return;
+  const q = els.historySearch.value.trim().toLowerCase();
+  const rows = _lastHistory.filter((e) => historyMatches(e, q));
+  if (!_lastHistory.length) {
+    els.historyList.innerHTML = `<p class="dim">Todavía no se registró ninguna descarga.</p>`;
+    return;
+  }
+  if (!rows.length) {
+    els.historyList.innerHTML = `<p class="dim">Sin resultados para "${escapeAttr(q)}".</p>`;
+    return;
+  }
+  const html = `<table class="data-table">
+    <thead><tr><th>Archivo</th><th>Sitio</th><th class="num-col">Tamaño</th><th>Descargado</th><th></th></tr></thead>
+    <tbody>${rows.map(historyRow).join("")}</tbody>
+  </table>`;
+  if (!updateListHTML(els.historyList, "history:" + q, html)) return;
+}
+
+els.historySearch.addEventListener("input", renderHistory);
+
+els.historyClearBtn.addEventListener("click", async () => {
+  if (!_lastHistory.length) return;
+  if (!confirm(`¿Borrar los ${_lastHistory.length} registros del historial? Los archivos en disco no se tocan — solo se olvida qué ya se descargó, así que un link repetido podría volver a bajarse.`)) return;
+  try {
+    await fetchJSON("/api/history/clear", { method: "POST" });
+    refreshHistory();
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+els.historyList.addEventListener("click", async (e) => {
+  const previewBtn = e.target.closest("button[data-hist-preview]");
+  if (previewBtn) {
+    openPreview(previewBtn.dataset.histPreview, previewBtn.dataset.kind);
+    return;
+  }
+  const btn = e.target.closest("button[data-hist-act]");
+  if (!btn) return;
+  const key = btn.dataset.key;
+  try {
+    if (btn.dataset.histAct === "remove") {
+      await fetchJSON("/api/history/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key }),
+      });
+    } else if (btn.dataset.histAct === "redownload") {
+      if (!confirm("¿Descargar de nuevo desde cero? Si el archivo todavía existe, se renombra a \".old\" en vez de borrarse.")) return;
+      await fetchJSON("/api/history/redownload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key }),
+      });
+      refreshTasks();
+    }
+    refreshHistory();
+  } catch (err) {
+    alert(err.message);
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════════════

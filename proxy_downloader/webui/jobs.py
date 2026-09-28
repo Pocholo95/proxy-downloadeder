@@ -338,6 +338,47 @@ class JobManager:
         self._queue.put(job_id)
         return job
 
+    def redownload_from_history(self, key):
+        """Forces a fresh download of one "Historial" entry, regardless of
+        whether its file still exists -- used by the history view's
+        "Redescargar" button, unlike resolve_item()'s redownload action
+        (which only ever fires when the file is already known-missing).
+
+        A same-named file already on disk is renamed aside to "<name>.old"
+        (numbered if that's also taken) rather than deleted outright: this
+        is a deliberate, possibly mistaken user action from a history list,
+        not a resume/dedupe decision the app is confident about, so losing
+        the old file if the redownload itself fails would be a bad trade
+        for reclaiming a few hundred KB. A stray .part from a prior
+        interrupted attempt is just discarded -- it was never a complete
+        file to protect. The history record is removed before queuing so
+        _mk_item()'s _apply_history() doesn't immediately re-mark the new
+        item as skipped/needs_confirm."""
+        entry = download_history.get_entry(self.state_dir, key)
+        if not entry:
+            raise ValueError("No se encontró ese elemento en el historial")
+        provider = registry.get(entry["site"])
+        if not provider:
+            raise ValueError(f"Sitio '{entry['site']}' ya no está disponible")
+
+        path = entry.get("path")
+        dest_dir = Path(path).parent if path else self.base_output_dir
+        hint_name = Path(path).name if path else None
+
+        if path:
+            p = Path(path)
+            Path(str(p) + ".part").unlink(missing_ok=True)
+            if p.exists():
+                backup, i = p.with_name(p.name + ".old"), 1
+                while backup.exists():
+                    backup = p.with_name(f"{p.name}.old{i}")
+                    i += 1
+                p.rename(backup)
+
+        download_history.delete(self.state_dir, key)
+        return self.create_preset_job(f"Redescarga: {hint_name or entry['file_id']}", str(dest_dir),
+                                       [(provider, entry["file_id"], hint_name, dest_dir)])
+
     def get(self, job_id):
         return self.jobs.get(job_id)
 

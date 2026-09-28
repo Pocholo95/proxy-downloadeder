@@ -21,6 +21,7 @@ from .upload_jobs import UploadManager
 from .ytdlp_jobs import YtdlpManager
 from .extension_jobs import ExtensionJobManager
 from .watchers import WatcherManager
+from . import download_history
 from . import download_router
 
 OUTPUT_DIR = os.environ.get("DOWNLOAD_DIR", "/downloads")
@@ -65,6 +66,55 @@ def api_set_site_aria2(name):
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     return jsonify({"ok": True})
+
+
+@app.get("/api/history")
+def api_list_history():
+    entries = download_history.list_all(STATE_DIR)
+    out_root = Path(OUTPUT_DIR)
+    for e in entries:
+        p = Path(e["path"]) if e.get("path") else None
+        e["name"] = p.name if p else None
+        e["exists"] = bool(p and p.is_file())
+        try:
+            e["size"] = p.stat().st_size if e["exists"] else None
+        except OSError:
+            e["size"] = None
+        e["kind"] = files_api.media_kind(p.name) if p else None
+        try:
+            e["rel_path"] = str(p.relative_to(out_root)) if p else None
+        except ValueError:
+            e["rel_path"] = None  # saved outside OUTPUT_DIR -- no preview route can reach it
+    return jsonify(entries)
+
+
+@app.post("/api/history/delete")
+def api_delete_history():
+    data = request.get_json(silent=True) or {}
+    key = data.get("key")
+    if not key:
+        return jsonify({"error": "Falta key"}), 400
+    download_history.delete(STATE_DIR, key)
+    return jsonify({"ok": True})
+
+
+@app.post("/api/history/clear")
+def api_clear_history():
+    download_history.clear_all(STATE_DIR)
+    return jsonify({"ok": True})
+
+
+@app.post("/api/history/redownload")
+def api_redownload_history():
+    data = request.get_json(silent=True) or {}
+    key = data.get("key")
+    if not key:
+        return jsonify({"error": "Falta key"}), 400
+    try:
+        job = manager.redownload_from_history(key)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify(job.to_dict()), 201
 
 
 @app.get("/api/watchers")

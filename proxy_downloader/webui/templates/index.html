@@ -121,6 +121,23 @@
         <div id="watchers-list"></div>
       </div>
 
+      <div class="view-panel" id="history-view" style="display:none;">
+        <div class="settings-block">
+          <div class="settings-block-head">
+            <h3>Historial de descargas</h3>
+            <span class="dim">Todo lo que la app registró como descargado — se usa para no volver a bajarlo. Quitar una fila de acá no borra el archivo, solo el registro.</span>
+          </div>
+          <div class="field-row" style="align-items:flex-end;">
+            <div class="field" style="flex:2;">
+              <label for="history-search">Buscar</label>
+              <input type="text" id="history-search" placeholder="Nombre, sitio o ruta…">
+            </div>
+            <button type="button" class="tbtn ghost" id="history-clear-btn">Borrar todo el historial</button>
+          </div>
+        </div>
+        <div id="history-list"></div>
+      </div>
+
       <div class="view-panel" id="sites-view" style="display:none;">
         <div class="settings-block">
           <div class="settings-block-head">
