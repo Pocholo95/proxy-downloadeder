@@ -1269,6 +1269,7 @@ function watcherRow(w) {
       <button type="button" class="tbtn ghost" data-watcher-act="check" data-wid="${w.id}" title="Revisar ahora">Revisar</button>
       <button type="button" class="tbtn ghost" data-watcher-act="${w.enabled ? "pause" : "resume"}" data-wid="${w.id}">${w.enabled ? "Pausar" : "Reanudar"}</button>
       <button type="button" class="tbtn ghost" data-watcher-act="copy" data-url="${escapeAttr(w.url)}" title="Copiar link">Link</button>
+      <button type="button" class="tbtn ghost" data-watcher-act="edit-url" data-wid="${w.id}" data-url="${escapeAttr(w.url)}" title="Cambiar el link (p. ej. si el sitio cambió de dominio)">Editar link</button>
       <button type="button" class="tbtn ghost" data-watcher-act="delete" data-wid="${w.id}" title="Deja de vigilar (no borra archivos)">Quitar</button>
     </td>
   </tr>`;
@@ -1322,6 +1323,17 @@ els.watchersList.addEventListener("click", async (e) => {
   try {
     if (act === "copy") {
       copyToClipboard(btn.dataset.url, btn);
+      return;
+    }
+    if (act === "edit-url") {
+      const newUrl = prompt("Nuevo link de la carpeta:", btn.dataset.url);
+      if (newUrl === null || newUrl.trim() === btn.dataset.url) return;
+      await fetchJSON(`/api/watchers/${wid}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: newUrl.trim() }),
+      });
+      refreshWatchers();
       return;
     }
     if (act === "check") {

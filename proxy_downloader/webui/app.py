@@ -91,7 +91,7 @@ def api_create_watcher():
 def api_update_watcher(wid):
     data = request.get_json(silent=True) or {}
     try:
-        w = watcher_manager.update(wid, data.get("interval_hours"), data.get("enabled"))
+        w = watcher_manager.update(wid, data.get("interval_hours"), data.get("enabled"), data.get("url"))
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     return jsonify(w)

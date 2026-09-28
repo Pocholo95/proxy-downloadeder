@@ -137,11 +137,42 @@ class WatcherManager:
         self._wake.set()
         return dict(w)
 
-    def update(self, wid, interval_hours=None, enabled=None):
+    def update(self, wid, interval_hours=None, enabled=None, url=None):
+        """`url` re-points an existing watcher at a new link for the same
+        folder -- e.g. Bunkr rotating its domain -- instead of forcing a
+        remove-and-re-add that would spin up a fresh entry (losing the
+        interval/name/history association) and, without a custom folder
+        name, land files in a brand-new subfolder and redownload everything
+        (the old folder_id, which embeds the domain, is baked into the
+        subfolder name when there's no override). The new link only needs
+        to resolve to a folder; it doesn't have to be the same site, since
+        a site could in principle be re-detected differently, though in
+        practice this exists for same-site domain changes."""
         with self._lock:
             w = self._watchers.get(wid)
             if not w:
                 raise ValueError("Watcher no encontrado")
+            if url is not None:
+                url = url.strip()
+                if not url:
+                    raise ValueError("Falta la URL de la carpeta")
+                provider = registry.detect(url)
+                if not provider:
+                    raise ValueError("No se reconoce el sitio de ese link")
+                folder_id = provider.extract_folder_id(url)
+                if not folder_id:
+                    raise ValueError("Solo se pueden vigilar carpetas/álbumes, no archivos sueltos")
+                for other in self._watchers.values():
+                    if (other["id"] != wid and other["site"] == provider.name
+                            and other["folder_id"] == folder_id and other["output_dir"] == w["output_dir"]):
+                        raise ValueError("Esa carpeta ya está siendo vigilada")
+                w["url"] = url
+                w["site"] = provider.name
+                w["folder_id"] = folder_id
+                w["last_status"] = "pending"
+                w["last_error"] = None
+                w["error_streak"] = 0
+                w["next_check"] = time.time()
             if interval_hours is not None:
                 w["interval_hours"] = _validate_interval(interval_hours)
                 if w["last_check"] and w["last_status"] != "error":
