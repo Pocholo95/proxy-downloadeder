@@ -743,11 +743,17 @@ function buildSidebar(entries) {
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z"/></svg>');
   html += `</div>`;
 
+  // On narrow screens the sidebar is a horizontal chip strip; re-rendering
+  // it (counts changed) would otherwise snap it back to the first chip.
+  const prevScroll = els.sidebar.scrollLeft;
   if (!updateListHTML(els.sidebar, "sidebar", html)) return;
+  els.sidebar.scrollLeft = prevScroll;
   els.sidebar.querySelectorAll("[data-view]").forEach((el) => {
     el.addEventListener("click", () => {
       state.view = el.getAttribute("data-view");
       renderCurrentView();
+      const active = els.sidebar.querySelector(".side-item.active");
+      if (active) active.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
     });
   });
 }
@@ -1275,10 +1281,10 @@ function watcherRow(w) {
       ${w.name ? `<div class="name-sub">${escapeAttr(truncate(w.url, 70))}</div>` : ""}
       ${detail}
     </td>
-    <td>${escapeAttr(w.site)}</td>
+    <td data-label="Sitio">${escapeAttr(w.site)}</td>
     <td>${watcherStatusHtml(w)}</td>
-    <td class="dim">${fmtWhen(w.last_check)}<br>siguiente: ${next}</td>
-    <td><input type="number" class="watcher-interval-input" data-wid="${w.id}" value="${w.interval_hours}" min="1" step="1" style="width:64px;"> h</td>
+    <td class="dim" data-label="Revisión">${fmtWhen(w.last_check)}<br>siguiente: ${next}</td>
+    <td data-label="Intervalo"><input type="number" class="watcher-interval-input" data-wid="${w.id}" value="${w.interval_hours}" min="1" step="1" style="width:64px;"> h</td>
     <td class="actions">
       <button type="button" class="tbtn ghost" data-watcher-act="check" data-wid="${w.id}" title="Revisar ahora">Revisar</button>
       <button type="button" class="tbtn ghost" data-watcher-act="${w.enabled ? "pause" : "resume"}" data-wid="${w.id}">${w.enabled ? "Pausar" : "Reanudar"}</button>
@@ -1405,9 +1411,9 @@ function historyRow(e) {
       <div class="name-main">${nameCell}</div>
       <div class="name-sub${e.exists ? "" : " warn"}">${e.exists ? escapeAttr(e.path || "") : "Archivo no encontrado en disco"}</div>
     </td>
-    <td>${escapeAttr(e.site)}</td>
-    <td class="num-col">${e.exists ? fmtBytes(e.size || 0) : "—"}</td>
-    <td class="dim">${fmtWhen(e.recorded_at)}</td>
+    <td data-label="Sitio">${escapeAttr(e.site)}</td>
+    <td class="num-col" data-label="Tamaño">${e.exists ? fmtBytes(e.size || 0) : "—"}</td>
+    <td class="dim" data-label="Descargado">${fmtWhen(e.recorded_at)}</td>
     <td class="actions">
       <button type="button" class="tbtn ghost" data-hist-act="redownload" data-key="${escapeAttr(e.key)}" title="Vuelve a descargarlo desde cero">Redescargar</button>
       <button type="button" class="tbtn ghost" data-hist-act="remove" data-key="${escapeAttr(e.key)}" title="Quita el registro (no borra el archivo)">Quitar</button>
@@ -1508,13 +1514,13 @@ function siteRow(site) {
   return `<tr>
     <td>${site.name}${site.is_default ? " ★" : ""}</td>
     <td class="dim">${site.domains.join(", ")}</td>
-    <td>${site.effective_use_proxy ? "✓ proxy" : "directo"}${overrideLabel}</td>
+    <td data-label="Proxy">${site.effective_use_proxy ? "✓ proxy" : "directo"}${overrideLabel}</td>
     <td class="actions">
       <button type="button" class="tbtn ghost" data-site="${site.name}" data-kind="proxy" data-action="enable">ON</button>
       <button type="button" class="tbtn ghost" data-site="${site.name}" data-kind="proxy" data-action="disable">OFF</button>
       <button type="button" class="tbtn ghost" data-site="${site.name}" data-kind="proxy" data-action="reset">reset</button>
     </td>
-    <td>${site.effective_use_aria2 ? "aria2" : "directo (1 conexión)"}${aria2OverrideLabel}</td>
+    <td data-label="aria2 (sin proxy)">${site.effective_use_aria2 ? "aria2" : "directo (1 conexión)"}${aria2OverrideLabel}</td>
     <td class="actions">
       <button type="button" class="tbtn ghost" data-site="${site.name}" data-kind="aria2" data-action="enable">ON</button>
       <button type="button" class="tbtn ghost" data-site="${site.name}" data-kind="aria2" data-action="disable">OFF</button>
@@ -1716,7 +1722,7 @@ async function loadFiles(path) {
     state.filesPath = data.path;
     renderBreadcrumb();
     els.filesList.innerHTML = data.entries.length
-      ? `<table class="data-table">
+      ? `<table class="data-table files-table">
           <thead><tr><th class="chk-col"><input type="checkbox" id="files-chk-all"></th><th>Nombre</th><th>Tamaño</th><th>Modificado</th><th></th></tr></thead>
           <tbody>${data.entries.map(fileRow).join("")}</tbody>
         </table>`
