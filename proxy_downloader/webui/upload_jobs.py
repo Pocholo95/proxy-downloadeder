@@ -391,7 +391,17 @@ class UploadManager:
     def _cleanup_source(self, job):
         if not job.is_temp_source:
             return
+        src = Path(job.source_path)
         try:
-            Path(job.source_path).unlink(missing_ok=True)
+            src.unlink(missing_ok=True)
         except OSError:
             pass
+        # Device uploads are staged as tmp_dir/<uuid>/<real name> (see
+        # app.py's _stage_upload_path); drop that per-file dir too. rmdir
+        # only succeeds on an empty dir, and only dirs directly under
+        # tmp_dir are ever touched.
+        if src.parent.parent == self.tmp_dir:
+            try:
+                src.parent.rmdir()
+            except OSError:
+                pass

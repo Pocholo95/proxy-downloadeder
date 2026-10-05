@@ -36,6 +36,25 @@ extension_manager = ExtensionJobManager(base_output_dir=OUTPUT_DIR, state_dir=ST
 watcher_manager = WatcherManager(state_dir=STATE_DIR, job_manager=manager)
 
 
+def _stage_upload_path(filename):
+    """Where a device-uploaded file is staged before its upload job runs.
+    Each file gets its own uuid *directory* and keeps its real name inside
+    it, because every upload_sites uploader sends Path(source).name as the
+    remote filename -- a uuid prefix on the file itself (the old scheme,
+    for collision safety) ended up in the name on Gofile/Bunkr/etc."""
+    d = Path(UPLOAD_TMP_DIR) / uuid.uuid4().hex
+    d.mkdir(parents=True, exist_ok=True)
+    return d / (secure_filename(filename) or "upload.bin")
+
+
+def _discard_staged(path):
+    path.unlink(missing_ok=True)
+    try:
+        path.parent.rmdir()
+    except OSError:
+        pass
+
+
 @app.get("/")
 def index():
     return render_template("index.html", default_output_dir=OUTPUT_DIR)
@@ -537,9 +556,7 @@ def api_create_upload_job():
             f = request.files["file"]
             if not f.filename:
                 return jsonify({"error": "no file"}), 400
-            name = secure_filename(f.filename) or "upload.bin"
-            Path(UPLOAD_TMP_DIR).mkdir(parents=True, exist_ok=True)
-            tmp_path = Path(UPLOAD_TMP_DIR) / f"{uuid.uuid4().hex}-{name}"
+            tmp_path = _stage_upload_path(f.filename)
             f.save(tmp_path)
             job = upload_manager.create_job(site, tmp_path, f.filename,
                                              dest_folder_id=folder_id, dest_folder_name=folder_name,
@@ -583,8 +600,8 @@ def api_create_upload_folder_jobs():
     JSON body in that case."""
     uploaded_files = request.files.getlist("files")
     is_temp_source = False
-    # Only populated for the raw-upload branch below -- tmp_path's own name
-    # is uuid-prefixed to dodge collisions, not what the UI/job record
+    # Only populated for the raw-upload branch below -- tmp_path's name is
+    # the secure_filename()'d version, not the original the UI/job record
     # should show as the source filename.
     source_names = {}
 
@@ -600,8 +617,7 @@ def api_create_upload_folder_jobs():
         for f in uploaded_files:
             if not f.filename:
                 continue
-            name = secure_filename(f.filename) or "upload.bin"
-            tmp_path = Path(UPLOAD_TMP_DIR) / f"{uuid.uuid4().hex}-{name}"
+            tmp_path = _stage_upload_path(f.filename)
             f.save(tmp_path)
             local_files.append(tmp_path)
             source_names[tmp_path] = f.filename
@@ -688,7 +704,8 @@ def api_create_upload_folder_jobs():
                 # that job finishes -- can't let two jobs (one per site)
                 # share the same on-disk file, so each site gets its own
                 # independent copy instead of reusing the just-uploaded one.
-                job_source = f.parent / f"{uuid.uuid4().hex}-{f.name}"
+                job_source = Path(UPLOAD_TMP_DIR) / uuid.uuid4().hex / f.name
+                job_source.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(f, job_source)
             job = upload_manager.create_job(site, job_source, source_names.get(f, f.name), dest_folder_id=folder_id,
                                              dest_folder_name=folder_name, guest_token=guest_token,
@@ -702,7 +719,7 @@ def api_create_upload_folder_jobs():
         # (see job_source above), so these were never any job's source_path
         # and won't get cleaned up by a job finishing.
         for f in local_files:
-            f.unlink(missing_ok=True)
+            _discard_staged(f)
 
     if not created and errors:
         return jsonify({"error": "; ".join(errors)}), 400
