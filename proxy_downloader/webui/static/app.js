@@ -816,7 +816,11 @@ function rowActionsHtml(entry) {
     icons.push(`<button type="button" class="ricon" data-action="resolve-skip" data-uid="${entry.uid}" data-item-index="${entry.needsConfirmIndex}" title="Omitir — dejarlo como está"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>`);
   }
   if (entry.cancellable) icons.push(`<button type="button" class="ricon" data-action="cancel" data-uid="${entry.uid}" title="Cancelar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6 6 18"/></svg></button>`);
-  if (entry.retryable) icons.push(`<button type="button" class="ricon" data-action="retry" data-uid="${entry.uid}" title="Reintentar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 4v5h5M20 20v-5h-5"/><path d="M5.5 9a7 7 0 0 1 12.3-2.5M18.5 15a7 7 0 0 1-12.3 2.5"/></svg></button>`);
+  // A multi-file download (folder/batch) retries per failed file, from the
+  // icon on that file's own row -- not the whole folder from here. The
+  // toolbar's "Reintentar fallidos" still covers retrying everything.
+  const perItemRetry = entry.engineKind === "downloads" && entry.children;
+  if (entry.retryable && !perItemRetry) icons.push(`<button type="button" class="ricon" data-action="retry" data-uid="${entry.uid}" title="Reintentar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 4v5h5M20 20v-5h-5"/><path d="M5.5 9a7 7 0 0 1 12.3-2.5M18.5 15a7 7 0 0 1-12.3 2.5"/></svg></button>`);
   if (entry.deletable) icons.push(`<button type="button" class="ricon" data-action="delete" data-uid="${entry.uid}" title="Quitar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button>`);
   return `<div class="row-actions">${links.join("")}${icons.join("")}</div>`;
 }
@@ -864,6 +868,8 @@ function childRowHtml(parent, c, isLast) {
     if (c.status === "error") icons.push(`<button type="button" class="ricon" data-action="retry-job" data-job-id="${c.jobId}" title="Reintentar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 4v5h5M20 20v-5h-5"/><path d="M5.5 9a7 7 0 0 1 12.3-2.5M18.5 15a7 7 0 0 1-12.3 2.5"/></svg></button>`);
     if (c.status === "done" || c.status === "error") icons.push(`<button type="button" class="ricon" data-action="delete-job" data-job-id="${c.jobId}" title="Quitar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button>`);
     actions = `<div class="row-actions">${links.join("")}${icons.join("")}</div>`;
+  } else if (parent.engineKind === "downloads" && parent.retryable && (c.status === "failed" || c.status === "cancelled")) {
+    actions = `<div class="row-actions"><button type="button" class="ricon" data-action="retry-item" data-uid="${parent.uid}" data-item-index="${c.idx}" title="Reintentar este archivo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 4v5h5M20 20v-5h-5"/><path d="M5.5 9a7 7 0 0 1 12.3-2.5M18.5 15a7 7 0 0 1-12.3 2.5"/></svg></button></div>`;
   } else if (parent.engineKind === "downloads" && c.status === "needs_confirm") {
     // Same data-action names/attrs the parent row's own needsConfirmIndex
     // buttons use (see rowActionsHtml) -- one shared click handler covers
@@ -1047,6 +1053,18 @@ els.taskBody.addEventListener("click", async (e) => {
     if (!entry) return;
     if (!confirm("¿Borrar del historial? No afecta los archivos ya descargados/subidos.")) return;
     await deleteEntry(entry);
+    refreshTasks();
+  } else if (action === "retry-item") {
+    const entry = _lastEntries.get(btn.dataset.uid);
+    if (entry) {
+      try {
+        await fetchJSON(`${entry.apiBase}/${entry.id}/retry`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ item: Number(btn.dataset.itemIndex) }),
+        });
+      } catch (err) { alert(err.message); }
+    }
     refreshTasks();
   } else if (action === "retry-job") {
     try { await fetchJSON(`/api/uploads/jobs/${btn.dataset.jobId}/retry`, { method: "POST" }); } catch (err) { alert(err.message); }

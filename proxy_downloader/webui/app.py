@@ -299,9 +299,10 @@ def api_cancel_job(job_id):
 
 @app.post("/api/jobs/<job_id>/retry")
 def api_retry_job(job_id):
+    item = (request.get_json(silent=True) or {}).get("item")
     try:
-        job = manager.retry_job(job_id)
-    except ValueError as e:
+        job = manager.retry_job(job_id, int(item) if item is not None else None)
+    except (ValueError, TypeError) as e:
         return jsonify({"error": str(e)}), 400
     return jsonify(job.to_dict()), 201
 

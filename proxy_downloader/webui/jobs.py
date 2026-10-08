@@ -459,8 +459,12 @@ class JobManager:
         self._persist()
         return len(to_remove)
 
-    def retry_job(self, job_id):
-        """Re-queues the failed/cancelled items of a terminated job in
+    def retry_job(self, job_id, item_index=None):
+        """`item_index` limits the retry to that one item (the per-row
+        retry icon on a failed file inside a folder) instead of every
+        failed/cancelled item in the job.
+
+        Re-queues the failed/cancelled items of a terminated job in
         place -- same id, same spot in the list -- instead of the old
         behavior of spinning up a brand new job for just those items:
         that left the original sitting in the list forever (a permanent
@@ -481,8 +485,10 @@ class JobManager:
 
             new_items = []
             any_retried = False
-            for it in src.items:
-                if it["status"] in ("failed", "cancelled"):
+            if item_index is not None and not 0 <= item_index < len(src.items):
+                raise ValueError("Item not found")
+            for i, it in enumerate(src.items):
+                if it["status"] in ("failed", "cancelled") and (item_index is None or i == item_index):
                     provider = registry.get(it["site"])
                     if provider:
                         new_items.append(self._mk_item(provider, it["file_id"], it.get("hint_name"), it["dest_dir"]))
@@ -646,19 +652,31 @@ class JobManager:
                     job.status = "running"
                 self._persist()
 
+            # Items kept as-is across a retry/resolve (already done/skipped)
+            # or reloaded from jobs.json lost their live `provider` object
+            # (to_dict() strips it before persisting) -- reattach it here,
+            # once, for every path that hands _run_job a preset list.
+            for it in items:
+                if it.get("provider") is None:
+                    it["provider"] = registry.get(it["site"])
+                    if it["provider"] is None and it["status"] not in ("done", "skipped"):
+                        it["status"] = "failed"
+                        it["message"] = f"El sitio '{it['site']}' ya no está disponible"
+
             # Direct items process first within this same run (stable sort:
             # relative order among items that agree on wants_proxy is kept)
             # so they're never stuck waiting behind a proxy fetch/validation
             # a *different* item in the same job triggers.
-            ordered_items = sorted(items, key=lambda it: _job_uses_proxy(it["provider"], args))
+            ordered_items = sorted(items, key=lambda it: bool(it["provider"]) and _job_uses_proxy(it["provider"], args))
 
             for item in ordered_items:
                 if job.cancel_event.is_set():
                     break
-                if item["status"] in ("done", "skipped", "needs_confirm"):
-                    # done: an in-place retry_job() only rebuilds the items
-                    # that failed -- whatever already succeeded stays in
-                    # this same list, but shouldn't be downloaded again.
+                if item["status"] in ("done", "skipped", "needs_confirm", "failed", "cancelled"):
+                    # done/failed/cancelled: an in-place retry_job() only
+                    # rebuilds the items it was asked to retry (all the
+                    # failed ones, or just one) -- everything else stays in
+                    # this same list as it was and shouldn't run again.
                     # skipped: _apply_history() already found this exact
                     # file on disk. needs_confirm: _apply_history() found a
                     # stale record for a file that's now missing -- left
