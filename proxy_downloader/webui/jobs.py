@@ -93,6 +93,18 @@ class _JobLogWriter:
         return False
 
 
+def _fail_stranded_items(job):
+    """Marks items still queued/running on a job that is already over (so
+    they can never run on their own) as failed -- which is what makes them
+    show a retry icon and be picked up by retry_job()."""
+    if job.status not in TERMINAL_STATUSES:
+        return
+    for it in job.items:
+        if it.get("status") in ("queued", "running"):
+            it["status"] = "failed"
+            it["message"] = it.get("message") or job.error or "Interrumpido"
+
+
 class Job:
     def __init__(self, job_id, kind, raw_input, output_dir, proxy_mode, speed, hold=False):
         self.id = job_id
@@ -255,6 +267,12 @@ class JobManager:
                 job = Job.from_dict(jd)
             except Exception:
                 continue
+            if job.status in TERMINAL_STATUSES:
+                # A job that crashed mid-run (e.g. the old retry's KeyError)
+                # was saved as "error" with its re-queued items still
+                # "queued" -- never failed, so nothing in the UI could
+                # retry them. Repair those into proper failed items.
+                _fail_stranded_items(job)
             if job.status in INFLIGHT_STATUSES:
                 msg = "Interrumpido (el servidor se reinició)"
                 job.status = "error"
@@ -588,8 +606,9 @@ class JobManager:
                 job.log(f"FATAL: {type(e).__name__}: {e}")
                 with job.lock:
                     job.status = "error"
-                    job.error = str(e)
+                    job.error = f"{type(e).__name__}: {e}"
                     job.finished_at = time.time()
+                    _fail_stranded_items(job)
                 self._persist()
 
     def _run_job(self, job):
@@ -685,6 +704,9 @@ class JobManager:
                     # skipped automatically either way.
                     continue
                 provider = item["provider"]
+                # Gone if the user deleted the folder (e.g. from Archivos)
+                # between the original run and this retry.
+                Path(item["dest_dir"]).mkdir(parents=True, exist_ok=True)
                 wants_proxy = _job_uses_proxy(provider, args)
                 if wants_proxy:
                     ensure_proxy_pool()
