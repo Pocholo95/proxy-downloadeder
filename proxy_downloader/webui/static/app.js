@@ -252,6 +252,9 @@ function statusPillClass(status) {
 // "not yet" the user shouldn't have undone out from under them in bulk.
 const CANCELLABLE_STATUSES = new Set(["queued", "held", "resolving", "fetching_proxies", "running"]);
 const RETRYABLE_STATUSES = new Set(["done_with_errors", "error", "cancelled"]);
+// A single failed file inside a folder can be retried even while the rest
+// of the job is still downloading (the server adds it to the running job).
+const ITEM_RETRY_WHILE_ACTIVE = new Set(["queued", "fetching_proxies", "running"]);
 const DELETABLE_STATUSES = new Set(["done", "done_with_errors", "error", "cancelled", "held"]);
 const VIDEO_CANCELLABLE = new Set(["queued", "running"]);
 const VIDEO_DELETABLE = new Set(["done", "error", "cancelled"]);
@@ -868,7 +871,8 @@ function childRowHtml(parent, c, isLast) {
     if (c.status === "error") icons.push(`<button type="button" class="ricon" data-action="retry-job" data-job-id="${c.jobId}" title="Reintentar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 4v5h5M20 20v-5h-5"/><path d="M5.5 9a7 7 0 0 1 12.3-2.5M18.5 15a7 7 0 0 1-12.3 2.5"/></svg></button>`);
     if (c.status === "done" || c.status === "error") icons.push(`<button type="button" class="ricon" data-action="delete-job" data-job-id="${c.jobId}" title="Quitar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button>`);
     actions = `<div class="row-actions">${links.join("")}${icons.join("")}</div>`;
-  } else if (parent.engineKind === "downloads" && parent.retryable && (c.status === "failed" || c.status === "cancelled")) {
+  } else if (parent.engineKind === "downloads" && (c.status === "failed" || c.status === "cancelled")
+             && (parent.retryable || ITEM_RETRY_WHILE_ACTIVE.has(parent.status))) {
     actions = `<div class="row-actions"><button type="button" class="ricon" data-action="retry-item" data-uid="${parent.uid}" data-item-index="${c.idx}" title="Reintentar este archivo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 4v5h5M20 20v-5h-5"/><path d="M5.5 9a7 7 0 0 1 12.3-2.5M18.5 15a7 7 0 0 1-12.3 2.5"/></svg></button></div>`;
   } else if (parent.engineKind === "downloads" && c.status === "needs_confirm") {
     // Same data-action names/attrs the parent row's own needsConfirmIndex

@@ -498,6 +498,22 @@ class JobManager:
         if not src:
             raise ValueError("Job not found")
         with src.lock:
+            if item_index is not None and src.status in ("queued", "fetching_proxies", "running"):
+                # The job is still going (some other file is downloading):
+                # swap just this failed item for a fresh queued one in
+                # place -- _run_job re-reads its queue every pass, so the
+                # worker picks it up without re-queueing the whole job.
+                if not 0 <= item_index < len(src.items):
+                    raise ValueError("Item not found")
+                it = src.items[item_index]
+                if it["status"] not in ("failed", "cancelled"):
+                    raise ValueError("Este archivo no está fallido")
+                provider = registry.get(it["site"])
+                if not provider:
+                    raise ValueError("Sitio no reconocido")
+                src.items[item_index] = self._mk_item(provider, it["file_id"], it.get("hint_name"), it["dest_dir"])
+                self._persist()
+                return src
             if src.status not in TERMINAL_STATUSES or src.status == "done":
                 raise ValueError("Solo se puede reintentar un trabajo terminado con fallos")
 
@@ -682,97 +698,114 @@ class JobManager:
                         it["status"] = "failed"
                         it["message"] = f"El sitio '{it['site']}' ya no está disponible"
 
-            # Direct items process first within this same run (stable sort:
-            # relative order among items that agree on wants_proxy is kept)
-            # so they're never stuck waiting behind a proxy fetch/validation
-            # a *different* item in the same job triggers.
-            ordered_items = sorted(items, key=lambda it: bool(it["provider"]) and _job_uses_proxy(it["provider"], args))
-
-            for item in ordered_items:
-                if job.cancel_event.is_set():
-                    break
-                if item["status"] in ("done", "skipped", "needs_confirm", "failed", "cancelled"):
-                    # done/failed/cancelled: an in-place retry_job() only
-                    # rebuilds the items it was asked to retry (all the
-                    # failed ones, or just one) -- everything else stays in
-                    # this same list as it was and shouldn't run again.
-                    # skipped: _apply_history() already found this exact
-                    # file on disk. needs_confirm: _apply_history() found a
-                    # stale record for a file that's now missing -- left
-                    # for the user to resolve via the item's own actions in
-                    # the UI (see resolve_item()) rather than downloaded or
-                    # skipped automatically either way.
-                    continue
-                provider = item["provider"]
-                # Gone if the user deleted the folder (e.g. from Archivos)
-                # between the original run and this retry.
-                Path(item["dest_dir"]).mkdir(parents=True, exist_ok=True)
-                wants_proxy = _job_uses_proxy(provider, args)
-                if wants_proxy:
-                    ensure_proxy_pool()
-                use_proxy = proxy_pool is not None and wants_proxy
-                use_aria2 = not use_proxy and not wants_proxy and _wants_aria2(provider)
+            # Re-read the queue each pass instead of iterating one fixed
+            # snapshot: retry_job(item_index=...) can rebuild a failed item
+            # as "queued" while this job is still running (the per-file
+            # retry icon), and it has to be picked up here. The "nothing
+            # left" check and the terminal status are set under the same
+            # lock that retry takes, so a retry either lands before this
+            # sees it or finds the job already finished (and re-queues it
+            # the normal way) -- never stranded in between.
+            while True:
                 with job.lock:
-                    item["status"] = "running"
-                    item["mode"] = "proxy" if wants_proxy else "direct"
-                    # aria2 has no way to hop proxies mid-download, so the
-                    # proxy-rotation path stays on plain `requests` (see
-                    # core/downloader.py); the no-proxy path gets aria2
-                    # unless the site opted out (use_aria2_by_default=False,
-                    # e.g. Bunkr -- see sites/bunkr.py), in which case it's
-                    # also plain `requests`, just single-connection/no-pool.
-                    item["engine"] = "aria2" if use_aria2 else "requests"
-                self._persist()
-
-                cb = self._make_progress_cb(job, item)
-                if use_proxy:
-                    ok, code = download_file(provider, item["file_id"], proxy_pool,
-                                              item["dest_dir"], job.speed, item["hint_name"],
-                                              progress_cb=cb, cancel_event=job.cancel_event)
-                elif wants_proxy:
-                    # site/job wanted a proxy but none are available — don't
-                    # silently fall back to the real IP.
-                    ok, code = False, None
+                    pending = [it for it in job.items if it["status"] == "queued"]
+                    if job.cancel_event.is_set() or not pending:
+                        if job.cancel_event.is_set():
+                            job.status = "cancelled"
+                            # Items that never got their turn are cancelled
+                            # too, so they show (and take) a retry like the
+                            # one that was interrupted mid-download.
+                            for it in job.items:
+                                if it["status"] == "queued":
+                                    it["status"] = "cancelled"
+                        else:
+                            # needs_confirm counts as "not actually done" the same
+                            # way failed does -- an item still waiting on the user's
+                            # redownload/omitir choice (see resolve_item()) shouldn't
+                            # make the whole job read as a clean "done".
+                            failed = sum(1 for it in job.items if it["status"] in ("failed", "needs_confirm"))
+                            job.status = "done" if failed == 0 else "done_with_errors"
+                        job.finished_at = time.time()
+                        break
+                # Direct items process first within this same run (stable sort:
+                # relative order among items that agree on wants_proxy is kept)
+                # so they're never stuck waiting behind a proxy fetch/validation
+                # a *different* item in the same job triggers.
+                ordered_items = sorted(pending, key=lambda it: bool(it["provider"]) and _job_uses_proxy(it["provider"], args))
+                for item in ordered_items:
+                    if job.cancel_event.is_set():
+                        break
+                    if item["status"] in ("done", "skipped", "needs_confirm", "failed", "cancelled"):
+                        # done/failed/cancelled: an in-place retry_job() only
+                        # rebuilds the items it was asked to retry (all the
+                        # failed ones, or just one) -- everything else stays in
+                        # this same list as it was and shouldn't run again.
+                        # skipped: _apply_history() already found this exact
+                        # file on disk. needs_confirm: _apply_history() found a
+                        # stale record for a file that's now missing -- left
+                        # for the user to resolve via the item's own actions in
+                        # the UI (see resolve_item()) rather than downloaded or
+                        # skipped automatically either way.
+                        continue
+                    provider = item["provider"]
+                    # Gone if the user deleted the folder (e.g. from Archivos)
+                    # between the original run and this retry.
+                    Path(item["dest_dir"]).mkdir(parents=True, exist_ok=True)
+                    wants_proxy = _job_uses_proxy(provider, args)
+                    if wants_proxy:
+                        ensure_proxy_pool()
+                    use_proxy = proxy_pool is not None and wants_proxy
+                    use_aria2 = not use_proxy and not wants_proxy and _wants_aria2(provider)
                     with job.lock:
-                        item["message"] = "No proxies available"
-                elif use_aria2:
-                    ok, code = download_direct(provider, item["file_id"], item["dest_dir"],
-                                                item["hint_name"], progress_cb=cb,
-                                                cancel_event=job.cancel_event)
-                else:
-                    ok, code = download_direct_requests(provider, item["file_id"], item["dest_dir"],
-                                                          item["hint_name"], progress_cb=cb,
-                                                          cancel_event=job.cancel_event)
+                        item["status"] = "running"
+                        item["mode"] = "proxy" if wants_proxy else "direct"
+                        # aria2 has no way to hop proxies mid-download, so the
+                        # proxy-rotation path stays on plain `requests` (see
+                        # core/downloader.py); the no-proxy path gets aria2
+                        # unless the site opted out (use_aria2_by_default=False,
+                        # e.g. Bunkr -- see sites/bunkr.py), in which case it's
+                        # also plain `requests`, just single-connection/no-pool.
+                        item["engine"] = "aria2" if use_aria2 else "requests"
+                    self._persist()
 
-                with job.lock:
-                    if code == "cancelled":
-                        item["status"] = "cancelled"
+                    cb = self._make_progress_cb(job, item)
+                    if use_proxy:
+                        ok, code = download_file(provider, item["file_id"], proxy_pool,
+                                                  item["dest_dir"], job.speed, item["hint_name"],
+                                                  progress_cb=cb, cancel_event=job.cancel_event)
+                    elif wants_proxy:
+                        # site/job wanted a proxy but none are available — don't
+                        # silently fall back to the real IP.
+                        ok, code = False, None
+                        with job.lock:
+                            item["message"] = "No proxies available"
+                    elif use_aria2:
+                        ok, code = download_direct(provider, item["file_id"], item["dest_dir"],
+                                                    item["hint_name"], progress_cb=cb,
+                                                    cancel_event=job.cancel_event)
                     else:
-                        item["status"] = "done" if ok else "failed"
-                        # The last "downloading" progress report is throttled
-                        # to once/second, so the final bytes written after
-                        # that tick never get reflected — snap to 100%.
-                        if ok and item["total"]:
-                            item["bytes_done"] = item["total"]
-                    item["code"] = code
-                self._persist()
+                        ok, code = download_direct_requests(provider, item["file_id"], item["dest_dir"],
+                                                              item["hint_name"], progress_cb=cb,
+                                                              cancel_event=job.cancel_event)
 
-                if ok and code != "cancelled":
-                    if item.get("path"):
-                        download_history.record(self.state_dir, item["site"], item["file_id"], item["path"])
-                    self._maybe_optimize(item)
+                    with job.lock:
+                        if code == "cancelled":
+                            item["status"] = "cancelled"
+                        else:
+                            item["status"] = "done" if ok else "failed"
+                            # The last "downloading" progress report is throttled
+                            # to once/second, so the final bytes written after
+                            # that tick never get reflected — snap to 100%.
+                            if ok and item["total"]:
+                                item["bytes_done"] = item["total"]
+                        item["code"] = code
+                    self._persist()
 
-            with job.lock:
-                if job.cancel_event.is_set():
-                    job.status = "cancelled"
-                else:
-                    # needs_confirm counts as "not actually done" the same
-                    # way failed does -- an item still waiting on the user's
-                    # redownload/omitir choice (see resolve_item()) shouldn't
-                    # make the whole job read as a clean "done".
-                    failed = sum(1 for it in job.items if it["status"] in ("failed", "needs_confirm"))
-                    job.status = "done" if failed == 0 else "done_with_errors"
-                job.finished_at = time.time()
+                    if ok and code != "cancelled":
+                        if item.get("path"):
+                            download_history.record(self.state_dir, item["site"], item["file_id"], item["path"])
+                        self._maybe_optimize(item)
+
             self._persist()
         finally:
             console.file = old_file
